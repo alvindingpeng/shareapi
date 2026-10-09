@@ -88,6 +88,10 @@ var channelReadOnlyFields = map[string]struct{}{
 	"balance":              {},
 	"balance_updated_time": {},
 	"used_quota":           {},
+	// Phase 1 vault: channel ownership is server-managed (operator on create,
+	// contributor on Phase 2 self-onboarding). Clients must not reassign it
+	// through the general edit endpoint.
+	"owner_user_id": {},
 }
 
 func clearChannelReadOnlyFields(channel *PatchChannel, requestData map[string]any) {
@@ -108,6 +112,9 @@ func clearChannelReadOnlyFields(channel *PatchChannel, requestData map[string]an
 	}
 	if _, ok := requestData["used_quota"]; ok {
 		channel.UsedQuota = 0
+	}
+	if _, ok := requestData["owner_user_id"]; ok {
+		channel.OwnerUserID = 0
 	}
 }
 

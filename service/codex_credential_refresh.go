@@ -51,7 +51,11 @@ func RefreshCodexChannelCredential(ctx context.Context, channelID int, opts Code
 		return nil, nil, fmt.Errorf("channel type is not Codex")
 	}
 
-	oauthKey, err := parseCodexOAuthKey(strings.TrimSpace(ch.Key))
+	plainKey, err := ch.DecryptedKey()
+	if err != nil {
+		return nil, nil, err
+	}
+	oauthKey, err := parseCodexOAuthKey(strings.TrimSpace(plainKey))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -91,7 +95,9 @@ func RefreshCodexChannelCredential(ctx context.Context, channelID int, opts Code
 		return nil, nil, err
 	}
 
-	if err := model.DB.Model(&model.Channel{}).Where("id = ?", ch.Id).Update("key", string(encoded)).Error; err != nil {
+	// The refreshed credential must go through the vault like any other
+	// channel write — never plaintext in the database.
+	if err := ch.RotateKey(string(encoded)); err != nil {
 		return nil, nil, err
 	}
 

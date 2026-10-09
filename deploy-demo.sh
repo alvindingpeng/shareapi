@@ -4,7 +4,8 @@
 # - Installs Docker if missing
 # - Builds the image FROM SOURCE (so branding changes are included)
 # - Picks a currently free host port (prefers 3000)
-# - Randomizes postgres/redis passwords + session secret (never 123456)
+# - Randomizes postgres/redis passwords + session secret + VAULT_KEK (never 123456)
+# - Passes .env.demo explicitly via --env-file (compose does not auto-read it)
 # - Prints the URL and first-login instructions
 #
 # Usage: sudo bash deploy-demo.sh
@@ -54,21 +55,33 @@ if [ ! -f .env.demo ]; then
   PG_PASS="$(openssl rand -hex 16)"
   REDIS_PASS="$(openssl rand -hex 16)"
   SESSION_SECRET="$(openssl rand -hex 32)"
+  VAULT_KEK="$(openssl rand -base64 32 | tr -d '\n')"
   cat > .env.demo <<EOF
 # generated $(date -u +%FT%TZ) - do not commit, do not share
 DEMO_PORT=$DEMO_PORT
 PG_PASS=$PG_PASS
 REDIS_PASS=$REDIS_PASS
 SESSION_SECRET=$SESSION_SECRET
+# Phase 1 credential vault: base64-encoded 32-byte KEK. Back this up separately;
+# losing it makes all vault-encrypted channel keys undecryptable.
+VAULT_KEK=$VAULT_KEK
 EOF
   chmod 600 .env.demo
   log "secrets generated -> .env.demo"
 else
   # keep existing passwords, but allow a new port choice
   sed -i "s/^DEMO_PORT=.*/DEMO_PORT=$DEMO_PORT/" .env.demo
+  if ! grep -q "^VAULT_KEK=" .env.demo; then
+    VAULT_KEK="$(openssl rand -base64 32 | tr -d '\n')"
+    printf 'VAULT_KEK=%s\n' "$VAULT_KEK" >> .env.demo
+    log "VAULT_KEK generated and appended -> .env.demo"
+  fi
   log "reusing existing .env.demo (new port $DEMO_PORT)"
 fi
+# NOTE: compose does NOT auto-read .env.demo, so pass it explicitly with
+# --env-file on every compose invocation below (and in the printed commands).
 set -a; . ./.env.demo; set +a
+COMPOSE="docker compose --env-file .env.demo -f docker-compose.yml -f docker-compose.demo.yml"
 
 # ---- 5. Compose override: build from source + free port + real secrets ----
 cat > docker-compose.demo.yml <<'EOF'
@@ -88,6 +101,7 @@ services:
       - SQL_DSN=postgresql://root:${PG_PASS}@postgres:5432/new-api
       - REDIS_CONN_STRING=redis://:${REDIS_PASS}@redis:6379
       - SESSION_SECRET=${SESSION_SECRET}
+      - VAULT_KEK=${VAULT_KEK}
       - TZ=Asia/Shanghai
       - ERROR_LOG_ENABLED=true
       - BATCH_UPDATE_ENABLED=true
@@ -107,9 +121,9 @@ log "building image from source (this takes a while, ~10-20 min on 4C8G)..."
 # driver builder does not hit this bug.
 docker buildx create --name shareapi-builder --driver docker-container --use 2>/dev/null \
   || docker buildx use shareapi-builder 2>/dev/null || true
-docker compose -f docker-compose.yml -f docker-compose.demo.yml build new-api
+$COMPOSE build new-api
 log "starting services..."
-docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d
+$COMPOSE up -d
 
 # ---- 7. Wait for healthy ----
 log "waiting for the app to become healthy..."
@@ -131,9 +145,12 @@ SERVER_IP="$(curl -s --max-time 8 ifconfig.me 2>/dev/null || hostname -I 2>/dev/
 echo
 echo "=================== ShareAPI demo is live ==================="
 echo "URL:      http://$SERVER_IP:$DEMO_PORT"
-echo "Admin:    root / 123456   <-- CHANGE THIS PASSWORD ON FIRST LOGIN"
-echo "Compose:  docker compose -f docker-compose.yml -f docker-compose.demo.yml"
+echo "Setup:    first visit opens the /api/setup wizard to create the admin account"
+echo "          (there is no default password; finish setup, then change it in Profile)"
+echo "Vault:    VAULT_KEK was generated into .env.demo - back it up separately."
+echo "          Losing it makes all encrypted channel keys undecryptable."
+echo "Compose:  docker compose --env-file .env.demo -f docker-compose.yml -f docker-compose.demo.yml"
 echo "Logs:     docker logs -f new-api"
 echo "============================================================="
-echo "Next: log in as root, change the password, then add your API key"
-echo "channels (Channel management) to start relaying."
+echo "Next: finish the setup wizard, then add your API key channels"
+echo "(Channel management) to start relaying."

@@ -82,7 +82,13 @@ func fetchCodexChannelWhamData(
 		return
 	}
 
-	oauthKey, err := codex.ParseOAuthKey(strings.TrimSpace(ch.Key))
+	plainKey, err := ch.DecryptedKey()
+	if err != nil {
+		common.SysError("failed to decrypt channel key: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": "解密渠道凭证失败，请检查保险库配置"})
+		return
+	}
+	oauthKey, err := codex.ParseOAuthKey(strings.TrimSpace(plainKey))
 	if err != nil {
 		common.SysError("failed to parse oauth key: " + err.Error())
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "解析凭证失败，请检查渠道配置"})
@@ -131,7 +137,10 @@ func fetchCodexChannelWhamData(
 
 			encoded, encErr := common.Marshal(oauthKey)
 			if encErr == nil {
-				_ = model.DB.Model(&model.Channel{}).Where("id = ?", ch.Id).Update("key", string(encoded)).Error
+				// Refreshed credentials go through the vault like any write.
+				if rotateErr := ch.RotateKey(string(encoded)); rotateErr != nil {
+					common.SysError("failed to rotate refreshed codex credential: " + rotateErr.Error())
+				}
 				model.InitChannelCache()
 			}
 

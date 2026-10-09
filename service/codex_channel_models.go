@@ -45,7 +45,11 @@ func fetchCodexChannelModels(
 	client *http.Client,
 	clientVersion string,
 ) ([]string, error) {
-	oauthKey, err := parseCodexOAuthKey(strings.TrimSpace(channel.Key))
+	plainKey, err := channel.DecryptedKey()
+	if err != nil {
+		return nil, err
+	}
+	oauthKey, err := parseCodexOAuthKey(strings.TrimSpace(plainKey))
 	if err != nil {
 		return nil, err
 	}

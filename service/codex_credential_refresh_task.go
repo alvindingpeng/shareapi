@@ -96,7 +96,11 @@ func runCodexCredentialAutoRefreshOnce() {
 				continue
 			}
 
-			rawKey := strings.TrimSpace(ch.Key)
+			plainKey, err := ch.DecryptedKey()
+			if err != nil {
+				continue
+			}
+			rawKey := strings.TrimSpace(plainKey)
 			if rawKey == "" {
 				continue
 			}
