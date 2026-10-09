@@ -263,6 +263,10 @@ const (
 	ChannelStatusEnabled          = 1 // don't use 0, 0 is the default value!
 	ChannelStatusManuallyDisabled = 2 // also don't use 0
 	ChannelStatusAutoDisabled     = 3
+	// ChannelStatusPendingReview marks a contributor-submitted channel waiting
+	// for admin approval. It is never used for relay (only Enabled is), and it
+	// is managed through the approve/reject review APIs, not batch ops.
+	ChannelStatusPendingReview = 4
 )
 
 const (

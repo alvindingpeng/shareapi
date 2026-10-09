@@ -54,6 +54,21 @@ func registerChannelRoutes(apiRouter *gin.RouterGroup) {
 	}
 }
 
+// registerContributorChannelRoutes registers the Phase 2 self-onboarding
+// APIs. Contributors authenticate as ordinary users (UserAuth); ownership is
+// enforced per-request in the controller, never via admin permissions.
+func registerContributorChannelRoutes(apiRouter *gin.RouterGroup) {
+	contributorRoute := apiRouter.Group("/contributor/channels")
+	contributorRoute.Use(middleware.UserAuth())
+
+	contributorRoute.POST("/", controller.ContributorAddChannel)
+	contributorRoute.GET("/", controller.ContributorListChannels)
+	contributorRoute.GET("/:id", controller.ContributorGetChannel)
+	contributorRoute.PUT("/:id", controller.ContributorUpdateChannel)
+	contributorRoute.DELETE("/:id", controller.ContributorDeleteChannel)
+	contributorRoute.POST("/:id/rotate-key", controller.ContributorRotateKey)
+}
+
 var channelPermissionRoutes = []permissionRoute{
 	{method: http.MethodGet, path: "/", permission: authz.ChannelRead, handler: controller.GetAllChannels},
 	{method: http.MethodGet, path: "/search", permission: authz.ChannelRead, handler: controller.SearchChannels},
@@ -98,4 +113,6 @@ var channelPermissionRoutes = []permissionRoute{
 	{method: http.MethodPost, path: "/upstream_updates/apply_all", permission: authz.ChannelWrite, handler: controller.ApplyAllChannelUpstreamModelUpdates},
 	{method: http.MethodPost, path: "/upstream_updates/detect", permission: authz.ChannelOperate, handler: controller.DetectChannelUpstreamModelUpdates},
 	{method: http.MethodPost, path: "/upstream_updates/detect_all", permission: authz.ChannelOperate, handler: controller.DetectAllChannelUpstreamModelUpdates},
+	{method: http.MethodPost, path: "/:id/approve", permission: authz.ChannelOperate, handler: controller.ApproveChannel},
+	{method: http.MethodPost, path: "/:id/reject", permission: authz.ChannelOperate, handler: controller.RejectChannel},
 }
