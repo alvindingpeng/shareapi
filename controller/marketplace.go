@@ -2,6 +2,7 @@ package controller
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -85,4 +86,29 @@ func GetMarketplaceModels(c *gin.Context) {
 	}
 
 	c.JSON(200, gin.H{"success": true, "message": "", "data": list})
+}
+
+// GetProbeCostSummary handles GET /api/marketplace/probe-costs (admin only).
+// Returns aggregate fingerprint probe costs for platform accounting (P3-6).
+// Query params: start_at, end_at (Unix timestamps, default last 30 days).
+func GetProbeCostSummary(c *gin.Context) {
+	now := common.GetTimestamp()
+	startAt := now - 30*86400
+	endAt := now
+	if v := c.Query("start_at"); v != "" {
+		if ts, err := strconv.ParseInt(v, 10, 64); err == nil && ts > 0 {
+			startAt = ts
+		}
+	}
+	if v := c.Query("end_at"); v != "" {
+		if ts, err := strconv.ParseInt(v, 10, 64); err == nil && ts > 0 {
+			endAt = ts
+		}
+	}
+	summary, err := model.GetProbeCostSummary(startAt, endAt)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(200, gin.H{"success": true, "message": "", "data": summary})
 }

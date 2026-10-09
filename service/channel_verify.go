@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
 // Fingerprint probe (Phase 3 anti-dilution).
@@ -41,6 +42,8 @@ type FingerprintResult struct {
 	Verdict           FingerprintVerdict
 	Detail            string
 	LatencyMs         int64
+	PromptTokens      int
+	CompletionTokens  int
 }
 
 // ProbeChannelFingerprint runs one fingerprint probe against a channel.
@@ -104,6 +107,10 @@ func ProbeChannelFingerprint(ctx context.Context, channel *model.Channel) *Finge
 	var parsed struct {
 		Model             string `json:"model"`
 		SystemFingerprint string `json:"system_fingerprint"`
+		Usage             struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
 	}
 	if err := common.Unmarshal(respBody, &parsed); err != nil {
 		result.Verdict = FingerprintError
@@ -112,6 +119,8 @@ func ProbeChannelFingerprint(ctx context.Context, channel *model.Channel) *Finge
 	}
 	result.EchoedModel = parsed.Model
 	result.SystemFingerprint = parsed.SystemFingerprint
+	result.PromptTokens = parsed.Usage.PromptTokens
+	result.CompletionTokens = parsed.Usage.CompletionTokens
 
 	if result.EchoedModel == "" {
 		result.Verdict = FingerprintError
@@ -190,6 +199,9 @@ func RunModelVerifyTask(ctx context.Context) (*ModelVerifySummary, error) {
 		summary.Probed++
 		result := ProbeChannelFingerprint(ctx, ch)
 
+		// P3-6: calculate probe cost in quota units for platform accounting.
+		costQuota := calculateProbeCost(result.ClaimedModel, result.PromptTokens, result.CompletionTokens)
+
 		_ = model.RecordVerificationLog(&model.ChannelVerificationLog{
 			ChannelId:         ch.Id,
 			ClaimedModel:      result.ClaimedModel,
@@ -198,6 +210,9 @@ func RunModelVerifyTask(ctx context.Context) (*ModelVerifySummary, error) {
 			Verdict:           string(result.Verdict),
 			Detail:            result.Detail,
 			LatencyMs:         result.LatencyMs,
+			PromptTokens:      result.PromptTokens,
+			CompletionTokens:  result.CompletionTokens,
+			CostQuota:         costQuota,
 		})
 
 		switch result.Verdict {
@@ -223,4 +238,17 @@ func RunModelVerifyTask(ctx context.Context) (*ModelVerifySummary, error) {
 		}
 	}
 	return summary, nil
+}
+
+// calculateProbeCost computes the quota cost of a probe for platform
+// accounting (P3-6). Uses the same ratio logic as billing: prompt tokens at
+// model ratio, completion tokens at model ratio * completion ratio.
+func calculateProbeCost(modelName string, promptTokens, completionTokens int) int64 {
+	if promptTokens <= 0 && completionTokens <= 0 {
+		return 0
+	}
+	modelRatio, _, _ := ratio_setting.GetModelRatio(modelName)
+	completionRatio := ratio_setting.GetCompletionRatio(modelName)
+	cost := float64(promptTokens)*modelRatio + float64(completionTokens)*modelRatio*completionRatio
+	return int64(cost)
 }
