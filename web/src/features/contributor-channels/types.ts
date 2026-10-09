@@ -12,6 +12,8 @@ export interface ContributorChannel {
   response_time: number
   balance: number
   used_quota: number
+  verification_status: number
+  last_verified_at: number
 }
 
 export interface ContributorChannelInput {

@@ -34,6 +34,19 @@ function StatusCell(props: { status: number }) {
   return <StatusBadge variant={config.variant} label={t(config.label)} size="sm" />
 }
 
+// Verification badge (Phase 3 anti-dilution trust signal).
+function VerificationCell(props: { status: number }) {
+  const { t } = useTranslation()
+  switch (props.status) {
+    case 1:
+      return <StatusBadge variant="success" label={t('Verified')} size="sm" />
+    case 2:
+      return <StatusBadge variant="warning" label={t('Suspicious')} size="sm" />
+    default:
+      return <StatusBadge variant="neutral" label={t('Unverified')} size="sm" />
+  }
+}
+
 function ChannelRow(props: {
   channel: ContributorChannel
   onDelete: (channel: ContributorChannel) => void
@@ -46,6 +59,9 @@ function ChannelRow(props: {
       <TableCell>{channel.models || '—'}</TableCell>
       <TableCell>
         <StatusCell status={channel.status} />
+      </TableCell>
+      <TableCell>
+        <VerificationCell status={channel.verification_status} />
       </TableCell>
       <TableCell className="text-right">
         <Button
@@ -111,6 +127,7 @@ export function MyChannelsPage() {
               <TableHead>{t('Name')}</TableHead>
               <TableHead>{t('Models')}</TableHead>
               <TableHead>{t('Status')}</TableHead>
+              <TableHead>{t('Verification')}</TableHead>
               <TableHead className="text-right">{t('Actions')}</TableHead>
             </TableRow>
           </TableHeader>
