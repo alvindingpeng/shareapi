@@ -35,7 +35,14 @@ type Channel struct {
 	KekID         string `json:"-" gorm:"size:64"`
 	// OwnerUserID attributes the channel to its contributor (Phase 2
 	// self-onboarding) and selects the per-owner DEK. 0 = operator-created.
-	OwnerUserID        int     `json:"owner_user_id"`
+	OwnerUserID int `json:"owner_user_id"`
+	// Phase 3 anti-dilution: fingerprint probe state. VerificationStatus is
+	// 0=unverified, 1=verified, 2=suspicious; VerificationFails counts
+	// consecutive mismatches for the auto-disable threshold.
+	VerificationStatus int    `json:"verification_status"`
+	LastVerifiedAt     int64  `json:"last_verified_at"`
+	VerificationFails   int    `json:"verification_fails"`
+	LastFingerprint    string `json:"-" gorm:"size:128"`
 	TestModel          *string `json:"test_model"`
 	Status             int     `json:"status" gorm:"default:1"`
 	Name               string  `json:"name" gorm:"index"`

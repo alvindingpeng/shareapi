@@ -22,6 +22,7 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(modelUpdateHandler{})
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
+	service.RegisterSystemTaskHandler(modelVerifyHandler{})
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and
@@ -160,4 +161,33 @@ func finishSystemTaskHandler(task *model.SystemTask, runnerID string, status mod
 	if err := model.FinishSystemTask(task.TaskID, runnerID, status, result, errorMessage); err != nil {
 		common.SysLog(fmt.Sprintf("system task %s failed to persist result: %v", task.TaskID, err))
 	}
+}
+
+// modelVerifyHandler runs the scheduled anti-dilution fingerprint probe over
+// enabled contributor channels (Phase 3).
+type modelVerifyHandler struct{}
+
+func (modelVerifyHandler) Type() string { return model.SystemTaskTypeModelVerify }
+
+func (modelVerifyHandler) Enabled() bool {
+	return common.GetEnvOrDefaultBool("MODEL_VERIFY_TASK_ENABLED", true)
+}
+
+func (modelVerifyHandler) Interval() time.Duration {
+	hours := common.GetEnvOrDefault("MODEL_VERIFY_INTERVAL_HOURS", 6)
+	if hours <= 0 {
+		hours = 6
+	}
+	return time.Duration(hours) * time.Hour
+}
+
+func (modelVerifyHandler) NewPayload() any { return nil }
+
+func (modelVerifyHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	summary, err := service.RunModelVerifyTask(ctx)
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
 }
