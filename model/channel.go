@@ -43,6 +43,11 @@ type Channel struct {
 	LastVerifiedAt     int64  `json:"last_verified_at"`
 	VerificationFails   int    `json:"verification_fails"`
 	LastFingerprint    string `json:"-" gorm:"size:128"`
+	// Phase 6: OAuth subscription credential lifecycle. Only populated for
+	// OAuth-based channel types (e.g. Codex). Timestamps are Unix seconds;
+	// 0 means not applicable / unknown.
+	OAuthExpiresAt   int64 `json:"oauth_expires_at"`
+	OAuthLastRefresh int64 `json:"oauth_last_refresh"`
 	TestModel          *string `json:"test_model"`
 	Status             int     `json:"status" gorm:"default:1"`
 	Name               string  `json:"name" gorm:"index"`

@@ -23,6 +23,7 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(midjourneyPollHandler{})
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
 	service.RegisterSystemTaskHandler(modelVerifyHandler{})
+	service.RegisterSystemTaskHandler(oauthRefreshHandler{})
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and
@@ -185,6 +186,34 @@ func (modelVerifyHandler) NewPayload() any { return nil }
 
 func (modelVerifyHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
 	summary, err := service.RunModelVerifyTask(ctx)
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
+}
+
+// oauthRefreshHandler refreshes expiring OAuth subscription tokens (Phase 6).
+type oauthRefreshHandler struct{}
+
+func (oauthRefreshHandler) Type() string { return model.SystemTaskTypeOAuthRefresh }
+
+func (oauthRefreshHandler) Enabled() bool {
+	return common.GetEnvOrDefaultBool("OAUTH_REFRESH_TASK_ENABLED", true)
+}
+
+func (oauthRefreshHandler) Interval() time.Duration {
+	minutes := common.GetEnvOrDefault("OAUTH_REFRESH_INTERVAL_MINUTES", 15)
+	if minutes <= 0 {
+		minutes = 15
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+func (oauthRefreshHandler) NewPayload() any { return nil }
+
+func (oauthRefreshHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	summary, err := service.RunOAuthRefreshTask(ctx)
 	if err != nil {
 		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
 		return

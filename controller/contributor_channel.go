@@ -91,6 +91,12 @@ func ContributorAddChannel(c *gin.Context) {
 		OwnerUserID: contributorID(c),
 		CreatedTime: common.GetTimestamp(),
 	}
+	// Phase 6: parse OAuth token expiry for subscription credential channels.
+	if model.IsOAuthChannelType(input.Type) {
+		if expiresAt := model.ParseOAuthExpiry(strings.TrimSpace(input.Key)); expiresAt > 0 {
+			channel.OAuthExpiresAt = expiresAt
+		}
+	}
 	if err := validateChannel(channel, true); err != nil {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 		return

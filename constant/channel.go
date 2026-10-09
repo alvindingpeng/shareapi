@@ -246,14 +246,14 @@ func IsAdvancedCustomChannel(channelType int) bool {
 }
 
 // contributorBlockedChannelTypes are channel types that self-onboarding
-// contributors may not submit in Phase 2 (API-key credentials only).
+// contributors may not submit. Phase 6 lifted the Codex block (OAuth
+// subscription credentials now supported with auto-refresh).
 // Blocked: Midjourney variants (special auth), Vertex AI (service-account
-// JSON), Codex (OAuth subscription), task plugins (internal, not an upstream).
+// JSON), task plugins (internal, not an upstream).
 var contributorBlockedChannelTypes = map[int]bool{
 	ChannelTypeMidjourney:     true,
 	ChannelTypeMidjourneyPlus: true,
 	ChannelTypeVertexAi:       true,
-	ChannelTypeCodex:          true,
 	ChannelTypeTaskPlugin:     true,
 }
 
