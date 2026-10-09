@@ -102,6 +102,11 @@ EOF
 
 # ---- 6. Build & up ----
 log "building image from source (this takes a while, ~10-20 min on 4C8G)..."
+# Workaround: the default builder can fail on pinned image digests
+# ("failed commit on ref ... unexpected commit digest"); a docker-container
+# driver builder does not hit this bug.
+docker buildx create --name shareapi-builder --driver docker-container --use 2>/dev/null \
+  || docker buildx use shareapi-builder 2>/dev/null || true
 docker compose -f docker-compose.yml -f docker-compose.demo.yml build new-api
 log "starting services..."
 docker compose -f docker-compose.yml -f docker-compose.demo.yml up -d
