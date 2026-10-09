@@ -1,6 +1,9 @@
 package model
 
 import (
+	"fmt"
+
+	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 )
 
@@ -59,4 +62,47 @@ func DeleteContributorChannel(id int, ownerUserID int) error {
 		return gorm.ErrRecordNotFound
 	}
 	return nil
+}
+
+// ReviewChannel transitions a pending-review channel to targetStatus
+// (Enabled on approve, ManuallyDisabled on reject). Unlike
+// UpdateChannelStatus, it works on channels that were never in the relay
+// cache (pending channels are excluded from cache by design). It returns
+// false when the channel is not pending review, so illegal transitions are
+// rejected without touching data.
+func ReviewChannel(id int, targetStatus int, reason string) (bool, error) {
+	pollingLock := GetChannelPollingLock(id)
+	pollingLock.Lock()
+	defer pollingLock.Unlock()
+
+	channel, err := GetChannelById(id, true)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	if channel.Status != common.ChannelStatusPendingReview {
+		return false, nil
+	}
+	if channel.ChannelInfo.IsMultiKey {
+		beforeStatus := channel.Status
+		handlerMultiKeyUpdate(channel, "", targetStatus, reason)
+		if beforeStatus == channel.Status {
+			return false, nil
+		}
+	} else {
+		info := channel.GetOtherInfo()
+		info["status_reason"] = reason
+		info["status_time"] = common.GetTimestamp()
+		channel.SetOtherInfo(info)
+		channel.Status = targetStatus
+	}
+	if err := channel.saveStatusState(); err != nil {
+		return false, err
+	}
+	if err := UpdateAbilityStatus(id, targetStatus == common.ChannelStatusEnabled); err != nil {
+		common.SysLog(fmt.Sprintf("review channel: failed to update ability status: channel_id=%d, error=%v", id, err))
+	}
+	return true, nil
 }

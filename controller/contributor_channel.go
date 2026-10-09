@@ -245,7 +245,14 @@ func reviewTransition(c *gin.Context, targetStatus int, action string) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": "channel is not pending review"})
 		return
 	}
-	changed := model.UpdateChannelStatus(id, "", targetStatus, action)
+	// NB: UpdateChannelStatus is cache-first and silently no-ops for channels
+	// that were never cached (pending review is excluded from the relay
+	// cache by design), so review uses the dedicated ReviewChannel instead.
+	changed, err := model.ReviewChannel(id, targetStatus, "review_"+action)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if changed {
 		model.InitChannelCache()
 		if targetStatus != common.ChannelStatusEnabled {
