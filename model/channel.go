@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/pkg/vault"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
@@ -23,8 +24,18 @@ import (
 type Channel struct {
 	Id                 int     `json:"id"`
 	Type               int     `json:"type" gorm:"default:0"`
-	Key                string  `json:"key" gorm:"not null"`
+	Key                string  `json:"key"`
 	OpenAIOrganization *string `json:"openai_organization"`
+	// Phase 1 credential vault: once migrated, the real credential lives only
+	// in KeyCiphertext (AES-256-GCM envelope encryption, see pkg/vault) and
+	// Key keeps the sentinel vault.KeySentinel. Key is intentionally nullable
+	// so migrations can distinguish states; the write path always stores the
+	// non-empty sentinel so legacy NOT NULL schemas keep working untouched.
+	KeyCiphertext string `json:"-" gorm:"type:text"`
+	KekID         string `json:"-" gorm:"size:64"`
+	// OwnerUserID attributes the channel to its contributor (Phase 2
+	// self-onboarding) and selects the per-owner DEK. 0 = operator-created.
+	OwnerUserID        int     `json:"owner_user_id"`
 	TestModel          *string `json:"test_model"`
 	Status             int     `json:"status" gorm:"default:1"`
 	Name               string  `json:"name" gorm:"index"`
@@ -179,14 +190,30 @@ func (c *ChannelInfo) Scan(value any) error {
 	return common.Unmarshal(jsonScanBytes(value), c)
 }
 
-func (channel *Channel) GetKeys() []string {
-	if channel.Key == "" {
+// DecryptedKey returns the channel's plaintext key blob.
+//
+// The whole Key column content is treated as one opaque blob: it may be a
+// newline-separated multi-key list or a JSON array (Vertex AI). Rows migrated
+// to the vault decrypt channels.key_ciphertext; legacy rows that still carry
+// plaintext in channels.key keep working until migrated. A missing KEK or
+// tampered ciphertext is a hard error — callers must fail closed, never fall
+// back to the sentinel.
+func (channel *Channel) DecryptedKey() (string, error) {
+	if channel.KeyCiphertext != "" {
+		return vault.Decrypt(channel.KeyCiphertext, channel.KekID, channel.OwnerUserID)
+	}
+	if channel.Key != "" && !vault.IsVaulted(channel.Key) {
+		return channel.Key, nil
+	}
+	return "", nil
+}
+
+// splitKeyBlob parses one opaque key blob into individual keys.
+func splitKeyBlob(blob string) []string {
+	if blob == "" {
 		return []string{}
 	}
-	if len(channel.Keys) > 0 {
-		return channel.Keys
-	}
-	trimmed := strings.TrimSpace(channel.Key)
+	trimmed := strings.TrimSpace(blob)
 	// If the key starts with '[', try to parse it as a JSON array (e.g., for Vertex AI scenarios)
 	if strings.HasPrefix(trimmed, "[") {
 		var arr []json.RawMessage
@@ -199,14 +226,29 @@ func (channel *Channel) GetKeys() []string {
 		}
 	}
 	// Otherwise, fall back to splitting by newline
-	keys := strings.Split(strings.Trim(channel.Key, "\n"), "\n")
-	return keys
+	return strings.Split(strings.Trim(blob, "\n"), "\n")
+}
+
+func (channel *Channel) GetKeys() []string {
+	if len(channel.Keys) > 0 {
+		return channel.Keys
+	}
+	blob, err := channel.DecryptedKey()
+	if err != nil {
+		common.SysLog(fmt.Sprintf("vault: failed to decrypt key for channel #%d: %v", channel.Id, err))
+		return []string{}
+	}
+	return splitKeyBlob(blob)
 }
 
 func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 	// If not in multi-key mode, return the original key string directly.
 	if !channel.ChannelInfo.IsMultiKey {
-		return channel.Key, 0, nil
+		blob, err := channel.DecryptedKey()
+		if err != nil {
+			return "", 0, types.NewError(err, types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+		}
+		return blob, 0, nil
 	}
 
 	// Obtain all keys (split by \n)
@@ -464,6 +506,12 @@ func BatchInsertChannels(channels []Channel) error {
 	}()
 
 	for _, chunk := range lo.Chunk(channels, 50) {
+		for i := range chunk {
+			if err := chunk[i].prepareKeyForStorage(); err != nil {
+				tx.Rollback()
+				return err
+			}
+		}
 		if err := tx.Create(&chunk).Error; err != nil {
 			tx.Rollback()
 			return err
@@ -545,7 +593,47 @@ func (channel *Channel) GetStatusCodeMapping() string {
 	return *channel.StatusCodeMapping
 }
 
+// prepareKeyForStorage encrypts a fresh plaintext Key into the vault before
+// the channel is written to the database. It is a no-op when Key is empty
+// (the edit form sends "" to keep the existing key) or already the sentinel.
+// After a successful call the in-memory Key holds only the sentinel; the
+// transient Keys field carries the plaintext key list for immediate use.
+func (channel *Channel) prepareKeyForStorage() error {
+	if channel.Key == "" || vault.IsVaulted(channel.Key) {
+		return nil
+	}
+	ciphertext, kekID, err := vault.Encrypt(channel.Key, channel.OwnerUserID)
+	if err != nil {
+		return err
+	}
+	channel.Keys = splitKeyBlob(channel.Key)
+	channel.KeyCiphertext = ciphertext
+	channel.KekID = kekID
+	channel.Key = vault.KeySentinel
+	return nil
+}
+
+// effectiveKeyBlob returns the plaintext key blob this update will result in:
+// the new Key when one was provided, otherwise the stored credential.
+func (channel *Channel) effectiveKeyBlob() (string, error) {
+	if channel.Key != "" && !vault.IsVaulted(channel.Key) {
+		return channel.Key, nil
+	}
+	if channel.KeyCiphertext != "" {
+		return channel.DecryptedKey()
+	}
+	// Key not provided: read the existing credential from the database.
+	existing, err := GetChannelById(channel.Id, true)
+	if err != nil {
+		return "", err
+	}
+	return existing.DecryptedKey()
+}
+
 func (channel *Channel) Insert() error {
+	if err := channel.prepareKeyForStorage(); err != nil {
+		return err
+	}
 	var err error
 	err = DB.Create(channel).Error
 	if err != nil {
@@ -558,32 +646,11 @@ func (channel *Channel) Insert() error {
 func (channel *Channel) Update() error {
 	// If this is a multi-key channel, recalculate MultiKeySize based on the current key list to avoid inconsistency after editing keys
 	if channel.ChannelInfo.IsMultiKey {
-		var keyStr string
-		if channel.Key != "" {
-			keyStr = channel.Key
-		} else {
-			// If key is not provided, read the existing key from the database
-			if existing, err := GetChannelById(channel.Id, true); err == nil {
-				keyStr = existing.Key
-			}
+		keyStr, err := channel.effectiveKeyBlob()
+		if err != nil {
+			return err
 		}
-		// Parse the key list (supports newline separation or JSON array)
-		keys := []string{}
-		if keyStr != "" {
-			trimmed := strings.TrimSpace(keyStr)
-			if strings.HasPrefix(trimmed, "[") {
-				var arr []json.RawMessage
-				if err := common.Unmarshal([]byte(trimmed), &arr); err == nil {
-					keys = make([]string, len(arr))
-					for i, v := range arr {
-						keys[i] = string(v)
-					}
-				}
-			}
-			if len(keys) == 0 { // fallback to newline split
-				keys = strings.Split(strings.Trim(keyStr, "\n"), "\n")
-			}
-		}
+		keys := splitKeyBlob(keyStr)
 		channel.ChannelInfo.MultiKeySize = len(keys)
 		// Clean up status data that exceeds the new key count to prevent index out of range
 		if channel.ChannelInfo.MultiKeyStatusList != nil {
@@ -593,6 +660,9 @@ func (channel *Channel) Update() error {
 				}
 			}
 		}
+	}
+	if err := channel.prepareKeyForStorage(); err != nil {
+		return err
 	}
 	var err error
 	err = DB.Model(channel).Updates(channel).Error
@@ -1193,4 +1263,100 @@ func CountChannelsGroupByType() (map[int64]int64, error) {
 		counts[r.Type] = r.Count
 	}
 	return counts, nil
+}
+
+// MigrateChannelKeysToVault encrypts every channel whose credential is still
+// stored in plaintext in channels.key. It is idempotent and safe to run on
+// every startup: already-vaulted rows are skipped. Call it before
+// InitChannelCache so the cache never sees plaintext from the database.
+func MigrateChannelKeysToVault() (int64, error) {
+	var channels []Channel
+	if err := DB.Where(commonKeyCol+" <> ? AND "+commonKeyCol+" <> ''", vault.KeySentinel).Find(&channels).Error; err != nil {
+		return 0, fmt.Errorf("vault migration: list channels: %w", err)
+	}
+	if len(channels) == 0 {
+		return 0, nil
+	}
+	if !vault.IsConfigured() {
+		return 0, fmt.Errorf("vault migration: %d channel(s) still store plaintext keys but %s is not configured; refusing to start with unprotected credentials", len(channels), vault.EnvKEK)
+	}
+	var migrated int64
+	for i := range channels {
+		ch := &channels[i]
+		if err := ch.prepareKeyForStorage(); err != nil {
+			common.SysLog(fmt.Sprintf("vault migration: channel #%d (%s): encrypt failed: %v", ch.Id, ch.Name, err))
+			continue
+		}
+		err := DB.Model(&Channel{}).Where("id = ?", ch.Id).Updates(map[string]any{
+			"key":            ch.Key,
+			"key_ciphertext": ch.KeyCiphertext,
+			"kek_id":         ch.KekID,
+		}).Error
+		if err != nil {
+			common.SysLog(fmt.Sprintf("vault migration: channel #%d (%s): save failed: %v", ch.Id, ch.Name, err))
+			continue
+		}
+		migrated++
+	}
+	if migrated > 0 {
+		common.SysLog(fmt.Sprintf("vault migration: encrypted %d channel key(s)", migrated))
+	}
+	return migrated, nil
+}
+
+// RotateKey replaces the channel credential with a new plaintext value,
+// encrypting it into the vault. Only the credential columns are persisted,
+// so concurrent status or config updates cannot be clobbered. The in-memory
+// channel is updated too, keeping cache and DB consistent.
+func (channel *Channel) RotateKey(newPlaintext string) error {
+	if channel.Id == 0 {
+		return errors.New("channel ID is 0")
+	}
+	if newPlaintext == "" || vault.IsVaulted(newPlaintext) {
+		return errors.New("vault: refusing to rotate to an empty credential")
+	}
+	ciphertext, kekID, err := vault.Encrypt(newPlaintext, channel.OwnerUserID)
+	if err != nil {
+		return err
+	}
+	updates := map[string]any{
+		"key":            vault.KeySentinel,
+		"key_ciphertext": ciphertext,
+		"kek_id":         kekID,
+	}
+	newKeys := splitKeyBlob(newPlaintext)
+	if channel.ChannelInfo.IsMultiKey {
+		channel.ChannelInfo.MultiKeySize = len(newKeys)
+		for _, m := range []map[int]int{channel.ChannelInfo.MultiKeyStatusList} {
+			for idx := range m {
+				if idx >= len(newKeys) {
+					delete(m, idx)
+				}
+			}
+		}
+		for _, m := range []map[int]string{channel.ChannelInfo.MultiKeyDisabledReason} {
+			for idx := range m {
+				if idx >= len(newKeys) {
+					delete(m, idx)
+				}
+			}
+		}
+		for _, m := range []map[int]int64{channel.ChannelInfo.MultiKeyDisabledTime} {
+			for idx := range m {
+				if idx >= len(newKeys) {
+					delete(m, idx)
+				}
+			}
+		}
+		updates["channel_info"] = channel.ChannelInfo
+	}
+	err = DB.Model(&Channel{}).Where("id = ?", channel.Id).Updates(updates).Error
+	if err != nil {
+		return err
+	}
+	channel.Key = vault.KeySentinel
+	channel.KeyCiphertext = ciphertext
+	channel.KekID = kekID
+	channel.Keys = newKeys
+	return nil
 }

@@ -278,9 +278,14 @@ func updateBatchTasks(ctx context.Context, adaptor BatchTaskPollingAdaptor, chan
 	// New API gateway, the same signal submission derives from the request.
 	info := &relaycommon.RelayInfo{}
 	info.ChannelMeta = &relaycommon.ChannelMeta{ChannelType: ch.Type, ChannelId: ch.Id, ChannelBaseUrl: baseURL}
-	info.ApiKey = ch.Key
+	plainKey, err := ch.DecryptedKey()
+	if err != nil {
+		common.SysLog(fmt.Sprintf("vault: failed to decrypt key for channel #%d: %v", ch.Id, err))
+		return recordPollFailureForTasks(ctx, adaptor, tasks, pollClassTransport, 0, err.Error())
+	}
+	info.ApiKey = plainKey
 	adaptor.Init(info)
-	resp, err := adaptor.FetchBatchTasks(baseURL, ch.Key, tasks, proxy)
+	resp, err := adaptor.FetchBatchTasks(baseURL, plainKey, tasks, proxy)
 	if err != nil {
 		common.SysLog(fmt.Sprintf("Get Task Do req error: %v", err))
 		return recordPollFailureForTasks(ctx, adaptor, tasks, pollClassTransport, 0, err.Error())
@@ -487,7 +492,11 @@ func updateVideoSingleTask(ctx context.Context, adaptor TaskPollingAdaptor, ch *
 		logger.LogError(ctx, fmt.Sprintf("Task %s not found in taskM", taskId))
 		return fmt.Errorf("task %s not found", taskId)
 	}
-	key := ch.Key
+	key, err := ch.DecryptedKey()
+	if err != nil {
+		logger.LogError(ctx, fmt.Sprintf("vault: failed to decrypt key for channel #%d: %v", ch.Id, err))
+		return err
+	}
 
 	privateData := task.PrivateData
 	if privateData.Key != "" {
