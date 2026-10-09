@@ -528,12 +528,17 @@ func GetChannelKey(c *gin.Context) {
 		"name": channel.Name,
 	})
 
-	// 返回渠道密钥
+	// 返回渠道密钥（从保险库解密）
+	plainKey, err := channel.DecryptedKey()
+	if err != nil {
+		writeSecurityOperationError(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "获取成功",
 		"data": map[string]any{
-			"key": channel.Key,
+			"key": plainKey,
 		},
 	})
 }
@@ -779,6 +784,10 @@ func AddChannel(c *gin.Context) {
 	}
 
 	addChannelRequest.Channel.CreatedTime = common.GetTimestamp()
+	// Phase 1 vault: attribute the channel to its contributor (the operator
+	// creating it for now; Phase 2 self-onboarding sets the contributor).
+	// OwnerUserID selects the per-owner DEK for envelope encryption.
+	addChannelRequest.Channel.OwnerUserID = c.GetInt("id")
 	keys := make([]string, 0)
 	switch addChannelRequest.Mode {
 	case "multi_to_single":
@@ -1205,24 +1214,10 @@ func UpdateChannel(c *gin.Context) {
 		switch *channel.KeyMode {
 		case "append":
 			// 追加模式：将新密钥添加到现有密钥列表
-			if originChannel.Key != "" {
+			// GetKeys 按需从保险库解密，解析换行分隔或 JSON 数组两种格式。
+			existingKeys := originChannel.GetKeys()
+			if len(existingKeys) > 0 {
 				var newKeys []string
-				var existingKeys []string
-
-				// 解析现有密钥
-				if strings.HasPrefix(strings.TrimSpace(originChannel.Key), "[") {
-					// JSON数组格式
-					var arr []json.RawMessage
-					if err := json.Unmarshal([]byte(strings.TrimSpace(originChannel.Key)), &arr); err == nil {
-						existingKeys = make([]string, len(arr))
-						for i, v := range arr {
-							existingKeys[i] = string(v)
-						}
-					}
-				} else {
-					// 换行分隔格式
-					existingKeys = strings.Split(strings.Trim(originChannel.Key, "\n"), "\n")
-				}
 
 				// 处理 Vertex AI 的特殊情况
 				if channel.Type == constant.ChannelTypeVertexAi && channel.GetOtherSettings().VertexKeyType != dto.VertexKeyTypeAPIKey {
@@ -1321,6 +1316,48 @@ func UpdateChannel(c *gin.Context) {
 		"success": true,
 		"message": "",
 		"data":    channel,
+	})
+	return
+}
+
+// RotateChannelKey replaces a channel's credential with a new one.
+// The new key is encrypted into the vault on write; the old credential stops
+// working immediately. Key content is never written to audit logs.
+func RotateChannelKey(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "渠道ID格式错误")
+		return
+	}
+	var req struct {
+		Key string `json:"key"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	newKey := strings.TrimSpace(req.Key)
+	if newKey == "" {
+		common.ApiErrorMsg(c, "新密钥不能为空")
+		return
+	}
+	channel, err := model.GetChannelById(id, true)
+	if err != nil {
+		common.ApiErrorI18n(c, i18n.MsgChannelNotExists)
+		return
+	}
+	if err := channel.RotateKey(newKey); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	model.InitChannelCache()
+	recordManageAudit(c, "channel.key_rotate", map[string]any{
+		"id":   id,
+		"name": channel.Name,
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "密钥已轮换",
 	})
 	return
 }
@@ -2242,7 +2279,15 @@ func OllamaPullModel(c *gin.Context) {
 		baseURL = channel.GetBaseURL()
 	}
 
-	key := strings.Split(channel.Key, "\n")[0]
+	plainKey, err := channel.DecryptedKey()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("Failed to decrypt channel key: %s", err.Error()),
+		})
+		return
+	}
+	key := strings.Split(plainKey, "\n")[0]
 	err = ollama.PullOllamaModel(baseURL, key, req.ModelName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -2311,7 +2356,15 @@ func OllamaPullModelStream(c *gin.Context) {
 	c.Header("Connection", "keep-alive")
 	c.Header("Access-Control-Allow-Origin", "*")
 
-	key := strings.Split(channel.Key, "\n")[0]
+	plainKey, err := channel.DecryptedKey()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("Failed to decrypt channel key: %s", err.Error()),
+		})
+		return
+	}
+	key := strings.Split(plainKey, "\n")[0]
 
 	// 创建进度回调函数
 	progressCallback := func(progress ollama.OllamaPullResponse) {
@@ -2387,7 +2440,15 @@ func OllamaDeleteModel(c *gin.Context) {
 		baseURL = channel.GetBaseURL()
 	}
 
-	key := strings.Split(channel.Key, "\n")[0]
+	plainKey, err := channel.DecryptedKey()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("Failed to decrypt channel key: %s", err.Error()),
+		})
+		return
+	}
+	key := strings.Split(plainKey, "\n")[0]
 	err = ollama.DeleteOllamaModel(baseURL, key, req.ModelName)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -2436,7 +2497,15 @@ func OllamaVersion(c *gin.Context) {
 		baseURL = channel.GetBaseURL()
 	}
 
-	key := strings.Split(channel.Key, "\n")[0]
+	plainKey, err := channel.DecryptedKey()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": fmt.Sprintf("Failed to decrypt channel key: %s", err.Error()),
+		})
+		return
+	}
+	key := strings.Split(plainKey, "\n")[0]
 	version, err := ollama.FetchOllamaVersion(baseURL, key)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
