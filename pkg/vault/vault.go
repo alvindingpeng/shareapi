@@ -68,18 +68,7 @@ func IsConfigured() bool {
 }
 
 func (envKEKProvider) GetKEK() ([]byte, error) {
-	raw := strings.TrimSpace(os.Getenv(EnvKEK))
-	if raw == "" {
-		return nil, fmt.Errorf("vault: %s is not configured; refusing to handle channel credentials", EnvKEK)
-	}
-	kek, err := base64.StdEncoding.DecodeString(raw)
-	if err != nil {
-		return nil, fmt.Errorf("vault: %s must be base64-encoded: %w", EnvKEK, err)
-	}
-	if len(kek) != 32 {
-		return nil, fmt.Errorf("vault: %s must decode to 32 bytes, got %d", EnvKEK, len(kek))
-	}
-	return kek, nil
+	return ParseKEK(EnvKEK, strings.TrimSpace(os.Getenv(EnvKEK)))
 }
 
 func (envKEKProvider) ID() string {
@@ -87,6 +76,28 @@ func (envKEKProvider) ID() string {
 	if err != nil {
 		return "env-unknown"
 	}
+	return KEKID(kek)
+}
+
+// ParseKEK validates a base64-encoded 32-byte KEK value (e.g. from an
+// environment variable) and returns the raw key bytes.
+func ParseKEK(name, raw string) ([]byte, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, fmt.Errorf("vault: %s is not configured; refusing to handle channel credentials", name)
+	}
+	kek, err := base64.StdEncoding.DecodeString(strings.TrimSpace(raw))
+	if err != nil {
+		return nil, fmt.Errorf("vault: %s must be base64-encoded: %w", name, err)
+	}
+	if len(kek) != 32 {
+		return nil, fmt.Errorf("vault: %s must decode to 32 bytes, got %d", name, len(kek))
+	}
+	return kek, nil
+}
+
+// KEKID derives the kek_id stamped on ciphertexts from raw KEK bytes.
+// It changes whenever the KEK value changes, so rotation is detectable.
+func KEKID(kek []byte) string {
 	sum := sha256.Sum256(kek)
 	return "env-" + hex.EncodeToString(sum[:])[:12]
 }
@@ -117,17 +128,26 @@ func gcmForDEK(dek []byte) (cipher.AEAD, error) {
 // Encrypt encrypts the whole channel key blob for the given owner.
 // It returns the base64 ciphertext and the kek_id to stamp on the row.
 func Encrypt(plaintext string, ownerUserID int) (ciphertext string, kekID string, err error) {
+	kek, err := defaultProvider.GetKEK()
+	if err != nil {
+		return "", "", err
+	}
+	defer zeroBytes(kek)
+	return EncryptWithKEK(kek, plaintext, ownerUserID)
+}
+
+// EncryptWithKEK encrypts with an explicit KEK instead of the default
+// provider. It exists for KEK rotation; normal code should use Encrypt.
+func EncryptWithKEK(kek []byte, plaintext string, ownerUserID int) (ciphertext string, kekID string, err error) {
 	if plaintext == "" {
 		return "", "", errors.New("vault: refusing to encrypt an empty credential")
 	}
 	if plaintext == KeySentinel {
 		return "", "", errors.New("vault: refusing to encrypt the sentinel value")
 	}
-	kek, err := defaultProvider.GetKEK()
-	if err != nil {
-		return "", "", err
+	if len(kek) != 32 {
+		return "", "", errors.New("vault: KEK must be 32 bytes")
 	}
-	defer zeroBytes(kek)
 	dek, err := deriveDEK(kek, ownerUserID)
 	if err != nil {
 		return "", "", err
@@ -142,15 +162,12 @@ func Encrypt(plaintext string, ownerUserID int) (ciphertext string, kekID string
 		return "", "", fmt.Errorf("vault: nonce: %w", err)
 	}
 	sealed := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
-	return base64.StdEncoding.EncodeToString(sealed), defaultProvider.ID(), nil
+	return base64.StdEncoding.EncodeToString(sealed), KEKID(kek), nil
 }
 
 // Decrypt reverses Encrypt. kekID must match the provider's current ID;
 // a mismatch means the KEK was rotated and the row needs re-encryption.
 func Decrypt(ciphertext string, kekID string, ownerUserID int) (string, error) {
-	if ciphertext == "" {
-		return "", errors.New("vault: empty ciphertext")
-	}
 	if kekID != "" && kekID != defaultProvider.ID() {
 		return "", fmt.Errorf("vault: kek_id %q does not match the active KEK; re-encrypt this channel", kekID)
 	}
@@ -159,6 +176,18 @@ func Decrypt(ciphertext string, kekID string, ownerUserID int) (string, error) {
 		return "", err
 	}
 	defer zeroBytes(kek)
+	return DecryptWithKEK(kek, ciphertext, ownerUserID)
+}
+
+// DecryptWithKEK decrypts with an explicit KEK, skipping the kek_id check.
+// It exists for KEK rotation; normal code should use Decrypt.
+func DecryptWithKEK(kek []byte, ciphertext string, ownerUserID int) (string, error) {
+	if ciphertext == "" {
+		return "", errors.New("vault: empty ciphertext")
+	}
+	if len(kek) != 32 {
+		return "", errors.New("vault: KEK must be 32 bytes")
+	}
 	dek, err := deriveDEK(kek, ownerUserID)
 	if err != nil {
 		return "", err

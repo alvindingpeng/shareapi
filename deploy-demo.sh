@@ -47,7 +47,14 @@ pick_port() {
   done
   python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1])"
 }
-DEMO_PORT="$(pick_port)"
+# Pin the port once chosen: an existing DEMO_PORT in .env.demo always wins,
+# so redeploys never hop ports. Only pick a fresh port on first install.
+if [ -f .env.demo ]; then
+  DEMO_PORT="$(grep '^DEMO_PORT=' .env.demo | cut -d= -f2- | tr -d '[:space:]')"
+fi
+if [ -z "$DEMO_PORT" ]; then
+  DEMO_PORT="$(pick_port)"
+fi
 log "using host port: $DEMO_PORT"
 
 # ---- 4. Secrets (generated once, kept in .env.demo) ----
@@ -69,14 +76,14 @@ EOF
   chmod 600 .env.demo
   log "secrets generated -> .env.demo"
 else
-  # keep existing passwords, but allow a new port choice
+  # keep existing passwords and the pinned port
   sed -i "s/^DEMO_PORT=.*/DEMO_PORT=$DEMO_PORT/" .env.demo
   if ! grep -q "^VAULT_KEK=" .env.demo; then
     VAULT_KEK="$(openssl rand -base64 32 | tr -d '\n')"
     printf 'VAULT_KEK=%s\n' "$VAULT_KEK" >> .env.demo
     log "VAULT_KEK generated and appended -> .env.demo"
   fi
-  log "reusing existing .env.demo (new port $DEMO_PORT)"
+  log "reusing existing .env.demo (pinned port $DEMO_PORT)"
 fi
 # NOTE: compose does NOT auto-read .env.demo, so pass it explicitly with
 # --env-file on every compose invocation below (and in the printed commands).

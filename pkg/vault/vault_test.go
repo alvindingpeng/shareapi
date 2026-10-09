@@ -137,6 +137,49 @@ func TestKekIDChangesWithKEK(t *testing.T) {
 	assert.NotEqual(t, id1, id2)
 }
 
+func TestExplicitKEKRoundtrip(t *testing.T) {
+	kek := make([]byte, 32)
+	for i := range kek {
+		kek[i] = byte(i + 7)
+	}
+	ct, kekID, err := EncryptWithKEK(kek, "sk-explicit-rotation-test", 42)
+	require.NoError(t, err)
+	assert.Equal(t, KEKID(kek), kekID)
+	plain, err := DecryptWithKEK(kek, ct, 42)
+	require.NoError(t, err)
+	assert.Equal(t, "sk-explicit-rotation-test", plain)
+}
+
+func TestExplicitKEKRejectsWrongKey(t *testing.T) {
+	kek := make([]byte, 32)
+	for i := range kek {
+		kek[i] = byte(i + 7)
+	}
+	ct, _, err := EncryptWithKEK(kek, "sk-explicit-rotation-test", 42)
+	require.NoError(t, err)
+	other := make([]byte, 32)
+	for i := range other {
+		other[i] = byte(i + 200)
+	}
+	_, err = DecryptWithKEK(other, ct, 42)
+	require.Error(t, err)
+}
+
+func TestParseKEK(t *testing.T) {
+	kek := make([]byte, 32)
+	for i := range kek {
+		kek[i] = byte(i + 3)
+	}
+	enc := base64.StdEncoding.EncodeToString(kek)
+	raw, err := ParseKEK("TEST_KEK", enc)
+	require.NoError(t, err)
+	assert.Equal(t, kek, raw)
+	_, err = ParseKEK("TEST_KEK", "")
+	require.Error(t, err)
+	_, err = ParseKEK("TEST_KEK", base64.StdEncoding.EncodeToString(kek[:16]))
+	require.Error(t, err)
+}
+
 func TestMain(m *testing.M) {
 	os.Unsetenv(EnvKEK)
 	SetProvider(envKEKProvider{})
