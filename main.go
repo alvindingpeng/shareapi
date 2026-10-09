@@ -84,6 +84,12 @@ func main() {
 		// for compatibility with old versions
 		common.MemoryCacheEnabled = true
 	}
+	// Phase 1 credential vault: encrypt any channel keys still stored in
+	// plaintext before the cache (or any request path) can see them.
+	// Fail fast if VAULT_KEK is missing while plaintext keys exist.
+	if _, err := model.MigrateChannelKeysToVault(); err != nil {
+		common.FatalLog(fmt.Sprintf("channel key vault migration failed: %s", err.Error()))
+	}
 	if common.MemoryCacheEnabled {
 		common.SysLog("memory cache enabled")
 		common.SysLog(fmt.Sprintf("sync frequency: %d seconds", common.SyncFrequency))

@@ -118,7 +118,13 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 			continue
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("mj-api-secret", midjourneyChannel.Key)
+		mjKey, keyErr := midjourneyChannel.DecryptedKey()
+		if keyErr != nil {
+			logger.LogError(ctx, fmt.Sprintf("vault: failed to decrypt key for midjourney channel #%d: %v", midjourneyChannel.Id, keyErr))
+			cancel()
+			continue
+		}
+		req.Header.Set("mj-api-secret", mjKey)
 		resp, err := service.GetHttpClient().Do(req)
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("Get Task Do req error: %v", err))
