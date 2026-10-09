@@ -23,6 +23,7 @@ const (
 	SystemTaskTypeAsyncTaskPoll  = "async_task_poll"
 	SystemTaskTypeModelVerify    = "model_verify"
 	SystemTaskTypeOAuthRefresh   = "oauth_refresh"
+	SystemTaskTypeSettlement     = "settlement"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

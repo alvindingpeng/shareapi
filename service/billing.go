@@ -82,6 +82,8 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 			} else {
 				checkAndSendQuotaNotify(relayInfo, actualQuota-preConsumed, preConsumed)
 			}
+			// Phase 5: credit contributor ledger (fire-and-forget).
+			go RecordContributorEarning(relayInfo.ChannelId, actualQuota, 0)
 		}
 		return nil
 	}
@@ -90,6 +92,10 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 	quotaDelta := actualQuota - relayInfo.FinalPreConsumedQuota
 	if quotaDelta != 0 {
 		return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
+	}
+	// Phase 5: credit contributor ledger (fire-and-forget, never blocks relay).
+	if actualQuota > 0 {
+		go RecordContributorEarning(relayInfo.ChannelId, actualQuota, 0)
 	}
 	return nil
 }

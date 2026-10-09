@@ -24,6 +24,7 @@ func RegisterScheduledSystemTasks() {
 	service.RegisterSystemTaskHandler(asyncTaskPollHandler{})
 	service.RegisterSystemTaskHandler(modelVerifyHandler{})
 	service.RegisterSystemTaskHandler(oauthRefreshHandler{})
+	service.RegisterSystemTaskHandler(settlementHandler{})
 }
 
 // channelTestHandler runs the scheduled "test all channels" job. Enablement and
@@ -64,6 +65,34 @@ func (channelTestHandler) Run(ctx context.Context, task *model.SystemTask, runne
 		return
 	}
 	summary, err := runChannelTestTask(ctx, payload.Mode, payload.Notify, service.NewSystemTaskProgressReporter(task, runnerID))
+	if err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		return
+	}
+	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, summary, nil)
+}
+
+// settlementHandler matures pending contributor ledger entries (Phase 5).
+type settlementHandler struct{}
+
+func (settlementHandler) Type() string { return model.SystemTaskTypeSettlement }
+
+func (settlementHandler) Enabled() bool {
+	return common.GetEnvOrDefaultBool("SETTLEMENT_TASK_ENABLED", true)
+}
+
+func (settlementHandler) Interval() time.Duration {
+	hours := common.GetEnvOrDefault("SETTLEMENT_INTERVAL_HOURS", 1)
+	if hours <= 0 {
+		hours = 1
+	}
+	return time.Duration(hours) * time.Hour
+}
+
+func (settlementHandler) NewPayload() any { return nil }
+
+func (settlementHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	summary, err := service.RunSettlementTask(ctx)
 	if err != nil {
 		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
 		return

@@ -67,6 +67,15 @@ func registerContributorChannelRoutes(apiRouter *gin.RouterGroup) {
 	contributorRoute.PUT("/:id", controller.ContributorUpdateChannel)
 	contributorRoute.DELETE("/:id", controller.ContributorDeleteChannel)
 	contributorRoute.POST("/:id/rotate-key", controller.ContributorRotateKey)
+
+	// Phase 5: ledger & withdrawals.
+	ledgerRoute := apiRouter.Group("/contributor/ledger")
+	ledgerRoute.Use(middleware.UserAuth())
+	ledgerRoute.GET("/balance", controller.GetLedgerBalance)
+	withdrawalRoute := apiRouter.Group("/contributor/withdrawals")
+	withdrawalRoute.Use(middleware.UserAuth())
+	withdrawalRoute.POST("/", controller.RequestWithdrawal)
+	withdrawalRoute.GET("/", controller.ListWithdrawals)
 }
 
 var channelPermissionRoutes = []permissionRoute{

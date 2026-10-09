@@ -38,6 +38,8 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/pricing", middleware.HeaderNavModuleAuth("pricing"), controller.GetPricing)
 		apiRouter.GET("/marketplace/models", controller.GetMarketplaceModels)
 		apiRouter.GET("/marketplace/probe-costs", middleware.AdminAuth(), controller.GetProbeCostSummary)
+		apiRouter.GET("/withdrawals", middleware.AdminAuth(), controller.AdminListWithdrawals)
+		apiRouter.POST("/withdrawals/:id/review", middleware.AdminAuth(), controller.AdminReviewWithdrawal)
 		perfMetricsRoute := apiRouter.Group("/perf-metrics")
 		perfMetricsRoute.Use(middleware.HeaderNavModulePublicOrUserAuth("pricing"))
 		{
