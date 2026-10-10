@@ -11,6 +11,7 @@ var filterEvalOrder = []dto.ChannelFilterKind{
 	dto.FilterRequestPath,
 	dto.FilterTaskPluginIdentity,
 	dto.FilterResponsesWebSocket,
+	dto.FilterChannelAllowlist,
 }
 
 // ChannelSatisfiesFilters reports whether ch passes every filter.
@@ -124,6 +125,12 @@ func channelMatchesFilter(ch *Channel, modelName string, filter dto.ChannelFilte
 		default:
 			return false
 		}
+	case dto.FilterChannelAllowlist:
+		// P10-3: token-scoped channel allowlist. Empty list means no restriction.
+		if len(filter.ChannelIDs) == 0 {
+			return true
+		}
+		return slices.Contains(filter.ChannelIDs, ch.Id)
 	default:
 		return true
 	}

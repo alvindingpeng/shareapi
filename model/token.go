@@ -32,7 +32,10 @@ type Token struct {
 	// P9-3: user-selected preferred channel. If set and the channel is
 	// available for the requested model, relay prefers it over smart routing.
 	PreferredChannelId int            `json:"preferred_channel_id" gorm:"default:0"`
-	DeletedAt          gorm.DeletedAt `gorm:"index"`
+	// P10-2: channel allowlist (JSON array of channel IDs). When non-empty,
+	// relay only routes through these channels; empty means no restriction.
+	ChannelAllowlist string         `json:"channel_allowlist" gorm:"type:text;default:''"`
+	DeletedAt        gorm.DeletedAt `gorm:"index"`
 }
 
 func (token *Token) GetAutoGroups() ([]string, error) {
@@ -44,6 +47,34 @@ func (token *Token) GetAutoGroups() ([]string, error) {
 		return nil, err
 	}
 	return groups, nil
+}
+
+// GetChannelAllowlist returns the channel IDs this token is restricted to.
+// Empty slice means no restriction.
+func (token *Token) GetChannelAllowlist() []int {
+	if token.ChannelAllowlist == "" {
+		return nil
+	}
+	var ids []int
+	if err := common.UnmarshalJsonStr(token.ChannelAllowlist, &ids); err != nil {
+		return nil
+	}
+	return ids
+}
+
+// SetChannelAllowlist stores the channel IDs this token may use.
+// Empty slice clears the restriction.
+func (token *Token) SetChannelAllowlist(ids []int) error {
+	if len(ids) == 0 {
+		token.ChannelAllowlist = ""
+		return nil
+	}
+	data, err := common.Marshal(ids)
+	if err != nil {
+		return err
+	}
+	token.ChannelAllowlist = string(data)
+	return nil
 }
 
 func (token *Token) SetAutoGroups(groups []string) error {
