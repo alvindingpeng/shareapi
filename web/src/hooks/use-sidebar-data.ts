@@ -18,8 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Activity,
+  Banknote,
   Box,
   ClipboardList,
+  Coins,
   CreditCard,
   FileText,
   FlaskConical,
@@ -117,6 +119,11 @@ export function useSidebarData(): SidebarData {
             icon: Radio,
           },
           {
+            title: t('My Funds'),
+            url: '/my-funds',
+            icon: Coins,
+          },
+          {
             title: t('Wallet'),
             url: '/wallet',
             icon: Wallet,
@@ -161,6 +168,16 @@ export function useSidebarData(): SidebarData {
             title: t('Subscriptions'),
             url: '/subscriptions',
             icon: CreditCard,
+          },
+          {
+            title: t('Withdrawals'),
+            url: '/withdrawals',
+            icon: Banknote,
+          },
+          {
+            title: t('Probe Costs'),
+            url: '/probe-costs',
+            icon: Coins,
           },
           {
             title: t('System Info'),
