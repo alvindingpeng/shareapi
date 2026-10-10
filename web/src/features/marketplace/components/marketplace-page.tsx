@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 
 import { EmptyState } from '@/components/empty-state'
@@ -10,9 +10,16 @@ import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { handleServerError } from '@/lib/handle-server-error'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { listMarketplaceChannels, listMarketplaceModels, getMarketplaceStats } from '../api'
+import {
+  getSubscribedModels,
+  listMarketplaceChannels,
+  listMarketplaceModels,
+  getMarketplaceStats,
+  updateSubscribedModels,
+} from '../api'
 import type { MarketplaceChannel, MarketplaceModel } from '../types'
 
 type SortKey = 'trust' | 'price' | 'channels'
@@ -91,9 +98,16 @@ function PriceTag(props: { model: MarketplaceModel; currency: 'USD' | 'CNY' }) {
   )
 }
 
-function ModelCard(props: { model: MarketplaceModel; currency: 'USD' | 'CNY' }) {
+function ModelCard(props: {
+  model: MarketplaceModel
+  currency: 'USD' | 'CNY'
+  subscribed: boolean
+  showSubscribe: boolean
+  onToggleSubscribe: (model: string, subscribed: boolean) => void
+  toggling: boolean
+}) {
   const { t } = useTranslation()
-  const { model, currency } = props
+  const { model, currency, subscribed, showSubscribe, onToggleSubscribe, toggling } = props
   return (
     <Link
       to="/marketplace/models/$modelName"
@@ -119,6 +133,21 @@ function ModelCard(props: { model: MarketplaceModel; currency: 'USD' | 'CNY' }) 
               {t('{{count}} channels', { count: model.channels })}
             </span>
           </div>
+          {showSubscribe && (
+            <Button
+              variant={subscribed ? 'outline' : 'default'}
+              size="sm"
+              disabled={toggling}
+              onClick={(e: React.MouseEvent) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onToggleSubscribe(model.model, subscribed)
+              }}
+              className="w-full"
+            >
+              {subscribed ? t('Unsubscribe') : t('Subscribe')}
+            </Button>
+          )}
         </CardContent>
       </Card>
     </Link>
@@ -128,11 +157,17 @@ function ModelCard(props: { model: MarketplaceModel; currency: 'USD' | 'CNY' }) 
 function ChannelCard(props: { channel: MarketplaceChannel }) {
   const { t } = useTranslation()
   const { channel } = props
-  let priceLabel = t('Base price')
-  if (channel.price_multiplier < 1) {
-    priceLabel = `-${Math.round((1 - channel.price_multiplier) * 100)}%`
-  } else if (channel.price_multiplier > 1) {
-    priceLabel = `+${Math.round((channel.price_multiplier - 1) * 100)}%`
+  // P11: prefer absolute user price; fall back to multiplier badge for legacy data.
+  const hasAbsolutePrice = (channel.user_price_usd_per_1m ?? 0) > 0
+  let priceLabel = hasAbsolutePrice
+    ? `$${channel.user_price_usd_per_1m.toFixed(4)}${t('/1M')}`
+    : t('Base price')
+  if (!hasAbsolutePrice) {
+    if (channel.price_multiplier < 1) {
+      priceLabel = `-${Math.round((1 - channel.price_multiplier) * 100)}%`
+    } else if (channel.price_multiplier > 1) {
+      priceLabel = `+${Math.round((channel.price_multiplier - 1) * 100)}%`
+    }
   }
   return (
     <Link
@@ -198,7 +233,45 @@ export function MarketplacePage() {
   const [brand, setBrand] = useState('')
   const [freeOnly, setFreeOnly] = useState(false)
   const [currency, setCurrency] = useState<'USD' | 'CNY'>('USD')
+  const [subscribedOnly, setSubscribedOnly] = useState(false)
   const { auth } = useAuthStore()
+  const queryClient = useQueryClient()
+
+  // P11: user model subscriptions (empty = all models, no restriction).
+  const subscribedQuery = useQuery({
+    queryKey: ['subscribed-models'],
+    queryFn: getSubscribedModels,
+    enabled: !!auth,
+  })
+  const subscribedModels = useMemo(
+    () => new Set(subscribedQuery.data ?? []),
+    [subscribedQuery.data],
+  )
+  const hasSubscriptionFilter = (subscribedQuery.data ?? []).length > 0
+
+  const toggleSubscribe = useMutation({
+    mutationFn: async ({
+      model,
+      subscribed,
+    }: {
+      model: string
+      subscribed: boolean
+    }) => {
+      const current = new Set(subscribedQuery.data ?? [])
+      if (subscribed) {
+        current.delete(model)
+      } else {
+        current.add(model)
+      }
+      return updateSubscribedModels([...current])
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['subscribed-models'] })
+    },
+    onError: (error) => {
+      handleServerError(error, t('Failed to update subscription'))
+    },
+  })
 
   const modelsQuery = useQuery({
     queryKey: ['marketplace-models', sort],
@@ -225,11 +298,15 @@ export function MarketplacePage() {
   })
 
   const models = useMemo(() => {
-    const all = modelsQuery.data ?? []
+    let all = modelsQuery.data ?? []
+    // P11: "subscribed only" filter (only meaningful when user has subscriptions).
+    if (subscribedOnly && hasSubscriptionFilter) {
+      all = all.filter((m) => subscribedModels.has(m.model))
+    }
     const q = query.trim().toLowerCase()
     if (!q) return all
     return all.filter((m) => m.model.toLowerCase().includes(q))
-  }, [modelsQuery.data, query])
+  }, [modelsQuery.data, query, subscribedOnly, hasSubscriptionFilter, subscribedModels])
 
   const channels = channelsQuery.data ?? []
   const isLoading =
@@ -305,6 +382,17 @@ export function MarketplacePage() {
             <option value="USD">USD</option>
             <option value="CNY">CNY</option>
           </select>
+          {tab === 'models' && auth && hasSubscriptionFilter && (
+            <label className="flex items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                checked={subscribedOnly}
+                onChange={(e) => setSubscribedOnly(e.target.checked)}
+                className="rounded"
+              />
+              {t('Subscribed only')}
+            </label>
+          )}
           {tab === 'channels' && (
             <>
               <select
@@ -383,7 +471,20 @@ export function MarketplacePage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {tab === 'models'
             ? models.map((m) => (
-                <ModelCard key={m.model} model={m} currency={currency} />
+                <ModelCard
+                  key={m.model}
+                  model={m}
+                  currency={currency}
+                  subscribed={subscribedModels.has(m.model)}
+                  showSubscribe={!!auth}
+                  onToggleSubscribe={(modelName, isSubscribed) =>
+                    toggleSubscribe.mutate({
+                      model: modelName,
+                      subscribed: isSubscribed,
+                    })
+                  }
+                  toggling={toggleSubscribe.isPending}
+                />
               ))
             : channels.map((ch) => (
                 <ChannelCard key={ch.channel_id} channel={ch} />

@@ -82,3 +82,16 @@ export async function getModelChannels(
   )
   return res.data.data ?? []
 }
+
+// P11: user model subscriptions. Empty array means subscribed to all (no restriction).
+export async function getSubscribedModels(): Promise<string[]> {
+  const res = await api.get('/api/user/self/subscribed-models')
+  return res.data.data?.models ?? []
+}
+
+export async function updateSubscribedModels(
+  models: string[],
+): Promise<string[]> {
+  const res = await api.put('/api/user/self/subscribed-models', { models })
+  return res.data.data?.models ?? []
+}

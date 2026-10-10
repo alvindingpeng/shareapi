@@ -22,6 +22,7 @@ export interface ContributorChannelInput {
   name: string
   base_url?: string | null
   models: string
+  price_usd_per_1m?: number // P11: contributor absolute price, USD per 1M tokens
 }
 
 export interface ContributorChannelsResponse {

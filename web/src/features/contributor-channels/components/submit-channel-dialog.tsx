@@ -33,6 +33,8 @@ const submitSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   base_url: z.string().optional(),
   models: z.string().min(1, 'At least one model is required'),
+  // P11: absolute USD price per 1M tokens; 0 = free channel
+  price_usd_per_1m: z.number().min(0).optional(),
 })
 
 type SubmitForm = z.infer<typeof submitSchema>
@@ -50,7 +52,7 @@ export function SubmitChannelDialog(props: SubmitChannelDialogProps) {
 
   const form = useForm<SubmitForm>({
     resolver: zodResolver(submitSchema),
-    defaultValues: { type: 1, key: '', name: '', base_url: '', models: '' },
+    defaultValues: { type: 1, key: '', name: '', base_url: '', models: '', price_usd_per_1m: undefined },
   })
 
   const onSubmit = async (values: SubmitForm) => {
@@ -62,6 +64,7 @@ export function SubmitChannelDialog(props: SubmitChannelDialogProps) {
         name: values.name.trim(),
         base_url: values.base_url?.trim() || null,
         models: values.models.trim(),
+        price_usd_per_1m: values.price_usd_per_1m,
       })
       form.reset()
       props.onOpenChange(false)
@@ -145,6 +148,34 @@ export function SubmitChannelDialog(props: SubmitChannelDialogProps) {
           />
           {form.formState.errors.models && (
             <p className="text-sm text-destructive">{form.formState.errors.models.message}</p>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="cc-price">{t('Price (USD / 1M tokens)')}</Label>
+          <Input
+            id="cc-price"
+            type="number"
+            min="0"
+            step="0.0001"
+            placeholder="0.5"
+            {...form.register('price_usd_per_1m', { valueAsNumber: true })}
+          />
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'Your price per 1M tokens in USD. Users will pay {{price}} (includes 15% platform fee). Set to 0 for a free channel.',
+              {
+                price: (() => {
+                  const v = form.watch('price_usd_per_1m')
+                  return typeof v === 'number' && !Number.isNaN(v)
+                    ? `$${(v * 1.15).toFixed(4)}`
+                    : '—'
+                })(),
+              },
+            )}
+          </p>
+          {form.formState.errors.price_usd_per_1m && (
+            <p className="text-sm text-destructive">{form.formState.errors.price_usd_per_1m.message}</p>
           )}
         </div>
 

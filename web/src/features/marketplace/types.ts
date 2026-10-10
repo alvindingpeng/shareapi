@@ -16,6 +16,8 @@ export interface MarketplaceChannel {
   models: string[]
   sharer: string
   price_multiplier: number
+  price_usd_per_1m: number // contributor absolute price, USD/1M tokens (P11); 0 = legacy multiplier mode
+  user_price_usd_per_1m: number // +15% platform markup (P11)
   trust_score: number
   verification_status: number
   endpoint_official: boolean
@@ -42,6 +44,8 @@ export interface MarketplaceModelChannel {
   models: string[]
   sharer: string
   price_multiplier: number
+  price_usd_per_1m: number // contributor absolute price, USD/1M tokens (P11); 0 = legacy multiplier mode
+  user_price_usd_per_1m: number // +15% platform markup (P11)
   trust_score: number
   verification_status: number // 0=unverified, 1=verified, 2=suspicious
   endpoint_official: boolean

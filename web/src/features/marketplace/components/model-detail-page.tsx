@@ -82,6 +82,11 @@ export function ModelDetailPage(props: { modelName: string }) {
   const { config } = getCurrencyDisplay()
 
   function channelPrice(ch: MarketplaceModelChannel): string {
+    // P11: prefer absolute user price; fall back to multiplier × base for legacy data.
+    const userPrice = ch.user_price_usd_per_1m ?? 0
+    if (userPrice > 0) {
+      return formatQuotaWithCurrency(userPrice * config.quotaPerUnit)
+    }
     if (basePrice <= 0) return '—'
     const usdPer1M = basePrice * ch.price_multiplier
     return formatQuotaWithCurrency(usdPer1M * config.quotaPerUnit)
