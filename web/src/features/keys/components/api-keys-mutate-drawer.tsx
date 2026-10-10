@@ -416,36 +416,41 @@ export function ApiKeysMutateDrawer({
                 )}
               />
 
-              <FormField
-                control={form.control}
-                name='group'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Group')}</FormLabel>
-                    <FormControl>
-                      <ApiKeyGroupCombobox
-                        options={groups}
-                        value={field.value}
-                        onValueChange={(group) => {
-                          field.onChange(group)
-                          if (group === 'auto') {
-                            form.setValue('cross_group_retry', true, {
+              {/* P11: group concept removed - backend ignores Token.Group.
+                  Field kept in schema for compatibility. */}
+              <div className='hidden'>
+                <FormField
+                  control={form.control}
+                  name='group'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormControl>
+                        <ApiKeyGroupCombobox
+                          options={groups}
+                          value={field.value}
+                          onValueChange={(group) => {
+                            field.onChange(group)
+                            if (group === 'auto') {
+                              form.setValue('cross_group_retry', true, {
+                                shouldDirty: true,
+                              })
+                              return
+                            }
+                            form.setValue('cross_group_retry', false, {
                               shouldDirty: true,
                             })
-                            return
-                          }
-                          form.setValue('cross_group_retry', false, {
-                            shouldDirty: true,
-                          })
-                        }}
-                        placeholder={t('Select a group')}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                          }}
+                          placeholder={t('Select a group')}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
 
+              {/* P11: auto_groups hidden - group concept deprecated. */}
+              <div className='hidden'>
               {selectedGroup === 'auto' && (
                 <FormField
                   control={form.control}
@@ -486,7 +491,10 @@ export function ApiKeysMutateDrawer({
                   )}
                 />
               )}
+              </div>
 
+              {/* P11: cross_group_retry hidden - group concept deprecated. */}
+              <div className='hidden'>
               {selectedGroup === 'auto' && (
                 <FormField
                   control={form.control}
@@ -514,6 +522,7 @@ export function ApiKeysMutateDrawer({
                   )}
                 />
               )}
+              </div>
 
               <FormField
                 control={form.control}
