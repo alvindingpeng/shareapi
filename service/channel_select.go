@@ -43,6 +43,31 @@ func AppendTaskPluginIdentityFilter(c *gin.Context, pluginKey string) {
 	})
 }
 
+// AppendTokenChannelAllowlistFilter restricts channel selection to the token's
+// configured channel allowlist (P10-2/P10-3). No-op when the token has no
+// allowlist set.
+func AppendTokenChannelAllowlistFilter(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	tokenID := c.GetInt("token_id")
+	if tokenID <= 0 {
+		return
+	}
+	token, err := model.GetTokenById(tokenID)
+	if err != nil {
+		return
+	}
+	allowlist := token.GetChannelAllowlist()
+	if len(allowlist) == 0 {
+		return
+	}
+	GetChannelConstraints(c).AddFilter(dto.ChannelFilter{
+		Kind:       dto.FilterChannelAllowlist,
+		ChannelIDs: allowlist,
+	})
+}
+
 type RetryParam struct {
 	Ctx          *gin.Context
 	TokenGroup   string

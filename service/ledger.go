@@ -62,7 +62,8 @@ func applyContributorPricing(channelID int, quota int) int {
 	if mult == 1.0 {
 		return quota
 	}
-	return int(float64(quota) * mult)
+	// Billing rules: use common.QuotaFromFloat, never a bare int() cast.
+	return common.QuotaFromFloat(float64(quota) * mult)
 }
 
 // RecordContributorEarning credits a contributor for a settled relay.
