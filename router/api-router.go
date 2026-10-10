@@ -225,6 +225,9 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.PATCH("/model_pricing", controller.UpdateModelPricingConfig)
 			optionRoute.POST("/model_pricing/convert", controller.PreviewModelPricingConversion)
 			optionRoute.POST("/model_pricing/preview", controller.PreviewModelPricing)
+			// P8-3: smart routing strategy config.
+			optionRoute.GET("/smart_routing", controller.GetSmartRoutingSetting)
+			optionRoute.PATCH("/smart_routing", controller.UpdateSmartRoutingSetting)
 			optionRoute.POST("/payment_compliance", controller.ConfirmPaymentCompliance)
 			optionRoute.GET("/channel_affinity_cache", controller.GetChannelAffinityCacheStats)
 			optionRoute.DELETE("/channel_affinity_cache", controller.ClearChannelAffinityCache)

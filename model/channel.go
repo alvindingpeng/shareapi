@@ -48,6 +48,13 @@ type Channel struct {
 	// 0 means not applicable / unknown.
 	OAuthExpiresAt   int64 `json:"oauth_expires_at"`
 	OAuthLastRefresh int64 `json:"oauth_last_refresh"`
+	// Phase 7: contributor pricing. Multiplier on the base model price.
+	// 1.0 = base price, 0.8 = 20% discount, 1.2 = 20% markup.
+	// Only meaningful for contributor-owned channels.
+	PriceMultiplier float64 `json:"price_multiplier" gorm:"default:1.0"`
+	// Phase 7: trust score (0-100). Computed from verification history,
+	// endpoint certification, and identity consistency.
+	TrustScore int `json:"trust_score" gorm:"default:50"`
 	TestModel          *string `json:"test_model"`
 	Status             int     `json:"status" gorm:"default:1"`
 	Name               string  `json:"name" gorm:"index"`
