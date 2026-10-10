@@ -108,16 +108,21 @@ func GetMarketplaceModels(c *gin.Context) {
 // Exposes per-channel pricing, trust, and sharer info so consumers can
 // pick specific channels like a flea market.
 type MarketplaceChannel struct {
-	ChannelID         int      `json:"channel_id"`
-	Name              string   `json:"name"`
-	Type              int      `json:"type"`
-	Models            []string `json:"models"`
-	Sharer            string   `json:"sharer"` // anonymized display name
-	PriceMultiplier   float64  `json:"price_multiplier"`
-	TrustScore        int      `json:"trust_score"`
-	VerificationStatus int     `json:"verification_status"`
-	EndpointOfficial  bool     `json:"endpoint_official"`
+	ChannelID          int      `json:"channel_id"`
+	Name               string   `json:"name"`
+	Type               int      `json:"type"`
+	Models             []string `json:"models"`
+	Sharer             string   `json:"sharer"` // anonymized display name
+	PriceMultiplier    float64  `json:"price_multiplier"`
+	PriceUSDPer1M      float64  `json:"price_usd_per_1m"`      // contributor's absolute price (P11)
+	UserPriceUSDPer1M  float64  `json:"user_price_usd_per_1m"` // +15% platform markup (P11)
+	TrustScore         int      `json:"trust_score"`
+	VerificationStatus int      `json:"verification_status"`
+	EndpointOfficial   bool     `json:"endpoint_official"`
 }
+
+// PlatformMarkupRate is the markup applied to contributor prices for users.
+const PlatformMarkupRate = 0.15
 
 // GetMarketplaceChannels lists individual contributor channels.
 // Public endpoint (no auth): powers the channel-level marketplace browse.
@@ -176,14 +181,16 @@ func GetMarketplaceChannels(c *gin.Context) {
 			mult = 1.0
 		}
 		entry := &MarketplaceChannel{
-			ChannelID:          ch.Id,
-			Name:               ch.Name,
-			Type:               ch.Type,
-			Models:             ch.GetModels(),
-			Sharer:             sharerNames[ch.OwnerUserID],
-			PriceMultiplier:    mult,
-			TrustScore:         ch.TrustScore,
-			VerificationStatus: ch.VerificationStatus,
+			ChannelID:           ch.Id,
+			Name:                ch.Name,
+			Type:                ch.Type,
+			Models:              ch.GetModels(),
+			Sharer:              sharerNames[ch.OwnerUserID],
+			PriceMultiplier:     mult,
+			PriceUSDPer1M:       ch.PriceUSDPer1M,
+			UserPriceUSDPer1M:   ch.PriceUSDPer1M * (1 + PlatformMarkupRate),
+			TrustScore:          ch.TrustScore,
+			VerificationStatus:  ch.VerificationStatus,
 		}
 		// Filter by search query.
 		if q != "" {
@@ -411,14 +418,16 @@ func GetMarketplaceModelChannels(c *gin.Context) {
 			mult = 1.0
 		}
 		entry := &MarketplaceChannel{
-			ChannelID:          ch.Id,
-			Name:               ch.Name,
-			Type:               ch.Type,
-			Models:             ch.GetModels(),
-			Sharer:             sharerNames[ch.OwnerUserID],
-			PriceMultiplier:    mult,
-			TrustScore:         ch.TrustScore,
-			VerificationStatus: ch.VerificationStatus,
+			ChannelID:           ch.Id,
+			Name:                ch.Name,
+			Type:                ch.Type,
+			Models:              ch.GetModels(),
+			Sharer:              sharerNames[ch.OwnerUserID],
+			PriceMultiplier:     mult,
+			PriceUSDPer1M:       ch.PriceUSDPer1M,
+			UserPriceUSDPer1M:   ch.PriceUSDPer1M * (1 + PlatformMarkupRate),
+			TrustScore:          ch.TrustScore,
+			VerificationStatus:  ch.VerificationStatus,
 		}
 		if log, err := model.GetLatestVerificationLog(ch.Id); err == nil && log != nil {
 			entry.EndpointOfficial = log.EndpointOfficial

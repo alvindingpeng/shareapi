@@ -28,6 +28,7 @@ type contributorChannelInput struct {
 	BaseURL         *string  `json:"base_url"`
 	Models          string   `json:"models"`
 	PriceMultiplier *float64 `json:"price_multiplier,omitempty"`
+	PriceUSDPer1M   *float64 `json:"price_usd_per_1m,omitempty"`
 }
 
 func contributorID(c *gin.Context) int {
@@ -93,7 +94,7 @@ func ContributorAddChannel(c *gin.Context) {
 		CreatedTime:     common.GetTimestamp(),
 		PriceMultiplier: 1.0,
 	}
-	// Phase 7: contributor pricing.
+	// Phase 7: contributor pricing (legacy multiplier).
 	if input.PriceMultiplier != nil {
 		mult := *input.PriceMultiplier
 		if mult != 0 && (mult < 0.5 || mult > 3.0) {
@@ -101,6 +102,15 @@ func ContributorAddChannel(c *gin.Context) {
 			return
 		}
 		channel.PriceMultiplier = mult
+	}
+	// P11: absolute USD pricing. Takes precedence over multiplier when > 0.
+	if input.PriceUSDPer1M != nil {
+		usd := *input.PriceUSDPer1M
+		if usd < 0 || usd > 1000 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "price must be between 0 and 1000 USD per 1M tokens"})
+			return
+		}
+		channel.PriceUSDPer1M = usd
 	}
 	// Phase 6: parse OAuth token expiry for subscription credential channels.
 	if model.IsOAuthChannelType(input.Type) {
@@ -180,6 +190,18 @@ func ContributorUpdateChannel(c *gin.Context) {
 		}
 		if mult != channel.PriceMultiplier {
 			channel.PriceMultiplier = mult
+			changed = true
+		}
+	}
+	// P11: absolute USD pricing.
+	if input.PriceUSDPer1M != nil {
+		usd := *input.PriceUSDPer1M
+		if usd < 0 || usd > 1000 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "price must be between 0 and 1000 USD per 1M tokens"})
+			return
+		}
+		if usd != channel.PriceUSDPer1M {
+			channel.PriceUSDPer1M = usd
 			changed = true
 		}
 	}
