@@ -128,13 +128,29 @@ func GetRandomSatisfiedChannel(
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
 
+	// P11: group concept removed. Empty group means select from all groups.
+	candidateIDs := group2model2channels[group][model]
+	if group == "" {
+		candidateIDs = nil
+		for _, model2channels := range group2model2channels {
+			candidateIDs = append(candidateIDs, model2channels[model]...)
+		}
+	}
+
 	// First, try to find channels with the exact model name.
-	channels, _ := filterCandidateIDs(group2model2channels[group][model], model, filters)
+	channels, _ := filterCandidateIDs(candidateIDs, model, filters)
 
 	// If no channels found, try to find channels with the normalized model name.
 	if len(channels) == 0 {
 		normalizedModel := ratio_setting.RoutingMatchModelName(model)
-		channels, _ = filterCandidateIDs(group2model2channels[group][normalizedModel], model, filters)
+		normIDs := group2model2channels[group][normalizedModel]
+		if group == "" {
+			normIDs = nil
+			for _, model2channels := range group2model2channels {
+				normIDs = append(normIDs, model2channels[normalizedModel]...)
+			}
+		}
+		channels, _ = filterCandidateIDs(normIDs, model, filters)
 	}
 
 	if len(channels) == 0 {
