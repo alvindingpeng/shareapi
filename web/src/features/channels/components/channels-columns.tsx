@@ -33,7 +33,6 @@ import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { BadgeListCell } from '@/components/data-table'
-import { GroupBadge } from '@/components/group-badge'
 import { ProviderBadge } from '@/components/provider-badge'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { TableId } from '@/components/table-id'
@@ -74,7 +73,6 @@ import {
   getResponseTimeConfig,
   isMultiKeyChannel,
   parseModelsList,
-  parseGroupsList,
   parseChannelSettings,
   channelsQueryKeys,
   handleUpdateChannelField,
@@ -1092,38 +1090,7 @@ export function useChannelsColumns(
         enableSorting: false,
       },
 
-      // Group column
-      {
-        accessorKey: 'group',
-        header: t('Groups'),
-        meta: { mobileHidden: true },
-        cell: ({ row }) => {
-          const group = row.getValue('group') as string
-          const groupArray = parseGroupsList(group)
-          return (
-            <BadgeListCell
-              items={groupArray.map((g) => (
-                <GroupBadge
-                  key={g}
-                  group={g}
-                  label={sensitiveVisible ? undefined : SENSITIVE_MASK}
-                  size='sm'
-                />
-              ))}
-            />
-          )
-        },
-        filterFn: (row, id, value) => {
-          if (!value || value.length === 0 || value.includes('all')) {
-            return true
-          }
-          const group = row.getValue(id) as string
-          const groupArray = parseGroupsList(group)
-          return groupArray.some((g) => value.includes(g))
-        },
-        size: 150,
-        enableSorting: false,
-      },
+      // P11: Group column removed - group concept deprecated.
 
       // Tag column
       {
