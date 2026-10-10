@@ -47,7 +47,7 @@ import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
-import { getChannels, searchChannels, getGroups } from '../api'
+import { getChannels, searchChannels } from '../api'
 import {
   DEFAULT_PAGE_SIZE,
   CHANNEL_STATUS,
@@ -133,7 +133,7 @@ export function ChannelsTable() {
         },
       },
       { columnId: 'type', searchKey: 'type', type: 'array' },
-      { columnId: 'group', searchKey: 'group', type: 'array' },
+      // P11: group column filter removed - group concept deprecated.
       { columnId: 'model', searchKey: 'model', type: 'string' },
     ],
   })
@@ -161,8 +161,8 @@ export function ChannelsTable() {
     () => (columnFilters.find((f) => f.id === 'type')?.value as string[]) || [],
     [columnFilters]
   )
-  const groupFilter =
-    (columnFilters.find((f) => f.id === 'group')?.value as string[]) || []
+  // P11: group filter removed - always empty.
+  const groupFilter: string[] = []
   const {
     value: modelFilter,
     inputValue: modelFilterInput,
@@ -204,20 +204,7 @@ export function ChannelsTable() {
     })
   }
 
-  // Fetch groups for filter
-  const { data: groupsData } = useQuery({
-    queryKey: ['groups'],
-    queryFn: async () => requireServerSuccess(await getGroups()),
-  })
-
-  const groupOptions = useMemo(
-    () =>
-      (groupsData?.data || []).map((g) => ({
-        label: g,
-        value: g,
-      })),
-    [groupsData]
-  )
+  // P11: groups fetch removed - group concept deprecated.
 
   // Fetch channels data
   // eslint-disable-next-line @tanstack/query/exhaustive-deps
@@ -403,13 +390,7 @@ export function ChannelsTable() {
     ]
   }, [t, typeCounts, typeFilter])
 
-  const groupFilterOptions = [
-    { label: t('All Groups'), value: 'all' },
-    ...groupOptions.map((option) => ({
-      ...option,
-      label: sensitiveVisible ? option.label : '••••',
-    })),
-  ]
+  // P11: groupFilterOptions removed - group concept deprecated.
 
   return (
     <DataTablePage
@@ -459,12 +440,7 @@ export function ChannelsTable() {
             options: typeFilterOptions,
             singleSelect: true,
           },
-          {
-            columnId: 'group',
-            title: t('Group'),
-            options: groupFilterOptions,
-            singleSelect: true,
-          },
+          // P11: group filter removed - group concept deprecated.
         ],
         preActions: (
           <>
