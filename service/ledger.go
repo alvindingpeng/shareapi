@@ -51,8 +51,12 @@ func applyContributorPricing(channelID int, quota int) int {
 	if channel.OwnerUserID <= 0 {
 		return quota
 	}
+	// P9-5: free channel (multiplier = 0) consumes no quota.
+	if channel.PriceMultiplier == 0 {
+		return 0
+	}
 	mult := channel.PriceMultiplier
-	if mult <= 0 {
+	if mult < 0 {
 		mult = 1.0
 	}
 	if mult == 1.0 {
