@@ -96,8 +96,8 @@ func ContributorAddChannel(c *gin.Context) {
 	// Phase 7: contributor pricing.
 	if input.PriceMultiplier != nil {
 		mult := *input.PriceMultiplier
-		if mult < 0.5 || mult > 3.0 {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "price multiplier must be between 0.5 and 3.0"})
+		if mult != 0 && (mult < 0.5 || mult > 3.0) {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "price multiplier must be 0 (free) or between 0.5 and 3.0"})
 			return
 		}
 		channel.PriceMultiplier = mult
@@ -171,11 +171,11 @@ func ContributorUpdateChannel(c *gin.Context) {
 		channel.Models = strings.TrimSpace(input.Models)
 		changed = true
 	}
-	// Phase 7: contributor pricing (0.5x to 3.0x of base price).
+	// Phase 7: contributor pricing (0 = free, 0.5x to 3.0x of base price).
 	if input.PriceMultiplier != nil {
 		mult := *input.PriceMultiplier
-		if mult < 0.5 || mult > 3.0 {
-			c.JSON(http.StatusOK, gin.H{"success": false, "message": "price multiplier must be between 0.5 and 3.0"})
+		if mult != 0 && (mult < 0.5 || mult > 3.0) {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "price multiplier must be 0 (free) or between 0.5 and 3.0"})
 			return
 		}
 		if mult != channel.PriceMultiplier {

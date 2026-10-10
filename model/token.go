@@ -29,6 +29,9 @@ type Token struct {
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
 	AutoGroups         string         `json:"-" gorm:"type:text"`
+	// P9-3: user-selected preferred channel. If set and the channel is
+	// available for the requested model, relay prefers it over smart routing.
+	PreferredChannelId int            `json:"preferred_channel_id" gorm:"default:0"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 

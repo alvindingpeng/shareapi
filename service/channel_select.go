@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -117,6 +119,17 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 	selectGroup := param.TokenGroup
 	userGroup := common.GetContextKeyString(param.Ctx, constant.ContextKeyUserGroup)
 	filters := GetChannelConstraints(param.Ctx).Filters
+
+	// P9-3: user-selected channel via X-Preferred-Channel header.
+	// If the channel exists, is enabled, and serves the model, use it directly.
+	if preferredID := getPreferredChannelID(param.Ctx); preferredID > 0 {
+		if ch, err := model.CacheGetChannel(preferredID); err == nil && ch != nil {
+			if ch.Status == common.ChannelStatusEnabled && channelServesModel(ch, param.ModelName) {
+				return ch, selectGroup, nil
+			}
+		}
+		// Fall through to normal selection if preferred channel is unavailable.
+	}
 
 	if param.TokenGroup == "auto" {
 		autoGroups := GetRequestAutoGroups(param.Ctx, userGroup)
@@ -389,4 +402,35 @@ func pinnedChannelUnavailable(pin dto.ChannelPin, statusCode int, messageID stri
 // trail, which the retry log and the consume log's admin_info both read.
 func AppendUsedChannel(c *gin.Context, channelID int) {
 	c.Set("use_channel", append(c.GetStringSlice("use_channel"), fmt.Sprintf("%d", channelID)))
+}
+
+// getPreferredChannelID returns the user-selected channel ID from the
+// X-Preferred-Channel header (P9-3). Returns 0 if not specified or invalid.
+func getPreferredChannelID(c *gin.Context) int {
+	if c == nil {
+		return 0
+	}
+	v := strings.TrimSpace(c.GetHeader("X-Preferred-Channel"))
+	if v == "" {
+		return 0
+	}
+	id, err := strconv.Atoi(v)
+	if err != nil || id <= 0 {
+		return 0
+	}
+	return id
+}
+
+// channelServesModel reports whether the channel serves the given model.
+func channelServesModel(ch *model.Channel, modelName string) bool {
+	if ch == nil || modelName == "" {
+		return false
+	}
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	for _, m := range ch.GetModels() {
+		if strings.ToLower(strings.TrimSpace(m)) == modelName {
+			return true
+		}
+	}
+	return false
 }
