@@ -282,6 +282,17 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	if channel == nil {
 		return nil, types.NewError(fmt.Errorf("分组 %s 下模型 %s 的可用渠道不存在（retry）", selectGroup, info.OriginModelName), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
 	}
+	// P9-5: free channel daily limit check.
+	if channel.PriceMultiplier == 0 && channel.OwnerUserID > 0 {
+		userID := c.GetInt("id")
+		if userID > 0 && !model.CheckAndIncrementFreeUsage(userID) {
+			return nil, types.NewError(
+				fmt.Errorf("今日免费额度已用完"),
+				types.ErrorCodeInsufficientUserQuota,
+				types.ErrOptionWithSkipRetry(),
+			)
+		}
+	}
 
 	info.PriceData.GroupRatioInfo = helper.HandleGroupRatio(c, info)
 
