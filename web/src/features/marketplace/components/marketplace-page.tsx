@@ -95,27 +95,33 @@ function ModelCard(props: { model: MarketplaceModel; currency: 'USD' | 'CNY' }) 
   const { t } = useTranslation()
   const { model, currency } = props
   return (
-    <Card className="flex flex-col">
-      <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-base break-all">{model.model}</CardTitle>
-          <TrustBadge
-            score={model.trust_score}
-            verified={model.verified_channels}
-            total={model.channels}
-          />
-        </div>
-      </CardHeader>
-      <CardContent className="flex flex-1 flex-col justify-between gap-4">
-        <PriceTag model={model} currency={currency} />
-        <div className="flex items-center justify-between text-sm">
-          <TrustBar score={model.trust_score} />
-          <span className="text-xs text-muted-foreground">
-            {t('{{count}} channels', { count: model.channels })}
-          </span>
-        </div>
-      </CardContent>
-    </Card>
+    <Link
+      to="/marketplace/models/$modelName"
+      params={{ modelName: model.model }}
+      className="block"
+    >
+      <Card className="flex h-full flex-col transition-shadow hover:shadow-md">
+        <CardHeader className="pb-2">
+          <div className="flex items-start justify-between gap-2">
+            <CardTitle className="text-base break-all">{model.model}</CardTitle>
+            <TrustBadge
+              score={model.trust_score}
+              verified={model.verified_channels}
+              total={model.channels}
+            />
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-1 flex-col justify-between gap-4">
+          <PriceTag model={model} currency={currency} />
+          <div className="flex items-center justify-between text-sm">
+            <TrustBar score={model.trust_score} />
+            <span className="text-xs text-muted-foreground">
+              {t('{{count}} channels', { count: model.channels })}
+            </span>
+          </div>
+        </CardContent>
+      </Card>
+    </Link>
   )
 }
 

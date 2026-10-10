@@ -4,6 +4,8 @@ import type {
   MarketplaceChannel,
   MarketplaceChannelsResponse,
   MarketplaceModel,
+  MarketplaceModelChannel,
+  MarketplaceModelChannelsResponse,
   MarketplaceResponse,
 } from './types'
 
@@ -68,4 +70,15 @@ export async function getChannelDetail(id: number): Promise<ChannelDetail | null
   const res = await api.get(`/api/marketplace/channels/${id}`)
   if (!res.data.success) return null
   return res.data.data
+}
+
+export async function getModelChannels(
+  modelName: string,
+  sort: 'price' | 'trust' = 'price',
+): Promise<MarketplaceModelChannel[]> {
+  const res = await api.get<MarketplaceModelChannelsResponse>(
+    `/api/marketplace/models/${encodeURIComponent(modelName)}/channels`,
+    { params: { sort } },
+  )
+  return res.data.data ?? []
 }

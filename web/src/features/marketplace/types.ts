@@ -32,3 +32,23 @@ export interface MarketplaceChannelsResponse {
   message: string
   data: MarketplaceChannel[]
 }
+
+// One channel serving a specific model, for the model detail comparison page.
+// Backend: GET /api/marketplace/models/:name/channels
+export interface MarketplaceModelChannel {
+  channel_id: number
+  name: string
+  type: number
+  models: string[]
+  sharer: string
+  price_multiplier: number
+  trust_score: number
+  verification_status: number // 0=unverified, 1=verified, 2=suspicious
+  endpoint_official: boolean
+}
+
+export interface MarketplaceModelChannelsResponse {
+  success: boolean
+  message: string
+  data: MarketplaceModelChannel[]
+}
