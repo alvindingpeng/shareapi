@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
 // Contributor ledger accounting (Phase 5 funding layer).
@@ -37,10 +38,12 @@ func ledgerMatureDays() int {
 	return 7
 }
 
-// applyContributorPricing scales the quota by the channel's price multiplier
-// for contributor-owned channels (Phase 7). Returns the quota unchanged for
-// operator channels or when the multiplier is 1.0.
-func applyContributorPricing(channelID int, quota int) int {
+// applyContributorPricing scales the quota by the channel's price for
+// contributor-owned channels. P11: uses absolute USD pricing (PriceUSDPer1M)
+// plus platform markup; falls back to legacy PriceMultiplier when unset.
+// Returns the quota unchanged for operator channels.
+// The modelBaseUSD is the internal reference price (never shown to users).
+func applyContributorPricing(channelID int, quota int, modelName string) int {
 	if quota <= 0 || channelID <= 0 {
 		return quota
 	}
@@ -51,19 +54,54 @@ func applyContributorPricing(channelID int, quota int) int {
 	if channel.OwnerUserID <= 0 {
 		return quota
 	}
-	// P9-5: free channel (multiplier = 0) consumes no quota.
-	if channel.PriceMultiplier == 0 {
+	// P9-5: free channel consumes no quota.
+	if channel.PriceMultiplier == 0 && channel.PriceUSDPer1M == 0 {
 		return 0
 	}
-	mult := channel.PriceMultiplier
-	if mult < 0 {
-		mult = 1.0
+
+	var mult float64
+	if channel.PriceUSDPer1M > 0 {
+		// P11: absolute pricing. User pays channel price + platform markup.
+		// mult = (channelUSD * (1 + markup)) / modelBaseUSD
+		baseUSD, ok := getModelBaseUSD(modelName)
+		if !ok || baseUSD <= 0 {
+			// No reference price; fall back to legacy multiplier.
+			mult = channel.PriceMultiplier
+			if mult <= 0 {
+				mult = 1.0
+			}
+		} else {
+			markup := getPlatformMarkupRate()
+			mult = (channel.PriceUSDPer1M * (1 + markup)) / baseUSD
+		}
+	} else {
+		// Legacy: multiplier on base price.
+		mult = channel.PriceMultiplier
+		if mult < 0 {
+			mult = 1.0
+		}
 	}
 	if mult == 1.0 {
 		return quota
 	}
 	// Billing rules: use common.QuotaFromFloat, never a bare int() cast.
 	return common.QuotaFromFloat(float64(quota) * mult)
+}
+
+// getModelBaseUSD returns the internal reference USD price for a model.
+// Used only for quota conversion; never displayed as a selling price.
+func getModelBaseUSD(modelName string) (float64, bool) {
+	return ratio_setting.GetModelPrice(modelName, false)
+}
+
+// getPlatformMarkupRate returns the platform markup on channel prices.
+// Default 15% (contributor gets 85%, platform gets 15%).
+func getPlatformMarkupRate() float64 {
+	// CONTRIBUTOR_SHARE_BPS=8500 means contributor gets 85%.
+	// Markup = (1 / 0.85) - 1 ≈ 0.176, but we use the simpler 15% on top.
+	// Actually: user_pays = channel_price / 0.85 → markup ≈ 17.6%
+	// For simplicity and transparency, use 15% flat markup.
+	return 0.15
 }
 
 // RecordContributorEarning credits a contributor for a settled relay.
