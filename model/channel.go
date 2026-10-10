@@ -51,7 +51,11 @@ type Channel struct {
 	// Phase 7: contributor pricing. Multiplier on the base model price.
 	// 1.0 = base price, 0.8 = 20% discount, 1.2 = 20% markup.
 	// Only meaningful for contributor-owned channels.
+	// P11: deprecated in favor of PriceUSDPer1M; kept for migration.
 	PriceMultiplier float64 `json:"price_multiplier" gorm:"default:1.0"`
+	// P11: contributor's absolute price in USD per 1M tokens.
+	// User pays PriceUSDPer1M * (1 + platform markup). 0 = use legacy multiplier.
+	PriceUSDPer1M float64 `json:"price_usd_per_1m" gorm:"default:0"`
 	// Phase 7: trust score (0-100). Computed from verification history,
 	// endpoint certification, and identity consistency.
 	TrustScore int `json:"trust_score" gorm:"default:50"`
