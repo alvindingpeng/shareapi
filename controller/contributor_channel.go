@@ -22,11 +22,12 @@ import (
 // contributorChannelInput is the simplified submission form. Contributors
 // cannot set type after creation, nor touch group/priority/weight.
 type contributorChannelInput struct {
-	Type    int     `json:"type"`
-	Key     string  `json:"key"`
-	Name    string  `json:"name"`
-	BaseURL *string `json:"base_url"`
-	Models  string  `json:"models"`
+	Type            int      `json:"type"`
+	Key             string   `json:"key"`
+	Name            string   `json:"name"`
+	BaseURL         *string  `json:"base_url"`
+	Models          string   `json:"models"`
+	PriceMultiplier *float64 `json:"price_multiplier,omitempty"`
 }
 
 func contributorID(c *gin.Context) int {
@@ -81,15 +82,25 @@ func ContributorAddChannel(c *gin.Context) {
 		return
 	}
 	channel := &model.Channel{
-		Type:        input.Type,
-		Key:         strings.TrimSpace(input.Key),
-		Name:        strings.TrimSpace(input.Name),
-		BaseURL:     input.BaseURL,
-		Models:      strings.TrimSpace(input.Models),
-		Group:       "default",
-		Status:      common.ChannelStatusPendingReview,
-		OwnerUserID: contributorID(c),
-		CreatedTime: common.GetTimestamp(),
+		Type:            input.Type,
+		Key:             strings.TrimSpace(input.Key),
+		Name:            strings.TrimSpace(input.Name),
+		BaseURL:         input.BaseURL,
+		Models:          strings.TrimSpace(input.Models),
+		Group:           "default",
+		Status:          common.ChannelStatusPendingReview,
+		OwnerUserID:     contributorID(c),
+		CreatedTime:     common.GetTimestamp(),
+		PriceMultiplier: 1.0,
+	}
+	// Phase 7: contributor pricing.
+	if input.PriceMultiplier != nil {
+		mult := *input.PriceMultiplier
+		if mult < 0.5 || mult > 3.0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "price multiplier must be between 0.5 and 3.0"})
+			return
+		}
+		channel.PriceMultiplier = mult
 	}
 	// Phase 6: parse OAuth token expiry for subscription credential channels.
 	if model.IsOAuthChannelType(input.Type) {
@@ -160,6 +171,18 @@ func ContributorUpdateChannel(c *gin.Context) {
 		channel.Models = strings.TrimSpace(input.Models)
 		changed = true
 	}
+	// Phase 7: contributor pricing (0.5x to 3.0x of base price).
+	if input.PriceMultiplier != nil {
+		mult := *input.PriceMultiplier
+		if mult < 0.5 || mult > 3.0 {
+			c.JSON(http.StatusOK, gin.H{"success": false, "message": "price multiplier must be between 0.5 and 3.0"})
+			return
+		}
+		if mult != channel.PriceMultiplier {
+			channel.PriceMultiplier = mult
+			changed = true
+		}
+	}
 	keyChanged := strings.TrimSpace(input.Key) != ""
 	if keyChanged {
 		if err := channel.RotateKey(strings.TrimSpace(input.Key)); err != nil {
@@ -177,15 +200,23 @@ func ContributorUpdateChannel(c *gin.Context) {
 	// plus the status transition in one update.
 	channel.Status = common.ChannelStatusPendingReview
 	updates := map[string]any{
-		"name":     channel.Name,
-		"base_url": channel.BaseURL,
-		"models":   channel.Models,
-		"status":   channel.Status,
+		"name":             channel.Name,
+		"base_url":         channel.BaseURL,
+		"models":           channel.Models,
+		"status":           channel.Status,
+		"price_multiplier": channel.PriceMultiplier,
 	}
 	if err := model.UpdateContributorChannel(channel.Id, channel.OwnerUserID, updates); err != nil {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 		return
 	}
+	// F2 fix: disable abilities so the channel stops taking relay traffic
+	// while pending re-review, then refresh the cache.
+	if err := model.UpdateAbilityStatus(channel.Id, false); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	model.InitChannelCache()
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "updated, re-queued for review"})
 }
 
@@ -199,6 +230,10 @@ func ContributorDeleteChannel(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 		return
 	}
+	recordManageAudit(c, "channel.contributor_delete", map[string]any{
+		"id":   channel.Id,
+		"name": channel.Name,
+	})
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": ""})
 }
 
@@ -229,6 +264,13 @@ func ContributorRotateKey(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
 		return
 	}
+	// F2 fix: disable abilities so the channel stops taking relay traffic
+	// while pending re-review, then refresh the cache.
+	if err := model.UpdateAbilityStatus(channel.Id, false); err != nil {
+		c.JSON(http.StatusOK, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	model.InitChannelCache()
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "key rotated, re-queued for review"})
 }
 

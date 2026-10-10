@@ -148,6 +148,21 @@ func GetRandomSatisfiedChannel(
 		return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channels[0])
 	}
 
+	// P8-2: smart routing. If enabled and multiple contributor channels
+	// serve this model, pick the best by price/trust strategy.
+	if smartRoutingEnabled() {
+		var candidates []*Channel
+		for _, id := range channels {
+			if ch, ok := channelsIDM[id]; ok {
+				candidates = append(candidates, ch)
+			}
+		}
+		if smart := SelectSmartChannel(candidates, getBasePriceForModel(model), smartRoutingStrategy()); smart != nil {
+			return smart, nil
+		}
+		// Fall through to standard priority selection.
+	}
+
 	uniquePriorities := make(map[int]bool)
 	for _, channelId := range channels {
 		if channel, ok := channelsIDM[channelId]; ok {

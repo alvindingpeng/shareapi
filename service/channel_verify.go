@@ -44,6 +44,13 @@ type FingerprintResult struct {
 	LatencyMs         int64
 	PromptTokens      int
 	CompletionTokens  int
+	// P7-4: base-URL certification.
+	BaseURLHost      string
+	EndpointOfficial bool // base URL terminates at an official endpoint
+	EndpointKnown    bool // channel type has a whitelist entry
+	// P7-5: L4 behavioral fingerprint (identity probe).
+	IdentityResponse   string
+	IdentityConsistent bool // response mentions the claimed model family
 }
 
 // ProbeChannelFingerprint runs one fingerprint probe against a channel.
@@ -69,6 +76,19 @@ func ProbeChannelFingerprint(ctx context.Context, channel *model.Channel) *Finge
 	if baseURL == "" {
 		result.Verdict = FingerprintError
 		result.Detail = "channel has no base URL"
+		return result
+	}
+
+	// P7-4: base-URL certification check. A channel claiming an official
+	// model must terminate at the official endpoint; otherwise it cannot
+	// be certified and is a shell risk.
+	result.BaseURLHost = extractHost(baseURL)
+	official, known := IsOfficialEndpoint(channel.Type, baseURL)
+	result.EndpointOfficial = official
+	result.EndpointKnown = known
+	if known && !official {
+		result.Verdict = FingerprintMismatch
+		result.Detail = fmt.Sprintf("base URL host %q is not an official endpoint for this channel type (shell risk)", result.BaseURLHost)
 		return result
 	}
 
@@ -132,8 +152,139 @@ func ProbeChannelFingerprint(ctx context.Context, channel *model.Channel) *Finge
 	} else {
 		result.Verdict = FingerprintMismatch
 		result.Detail = fmt.Sprintf("claimed %q but upstream served %q", result.ClaimedModel, result.EchoedModel)
+		return result
+	}
+
+	// P7-5: L4 behavioral fingerprint. Ask "who are you?" and check the
+	// response mentions the claimed model family. A shell that swaps in a
+	// different model will answer with the wrong identity.
+	identityResp, identityTokens := probeIdentity(ctx, baseURL, key, result.ClaimedModel)
+	result.IdentityResponse = identityResp
+	result.PromptTokens += identityTokens.Prompt
+	result.CompletionTokens += identityTokens.Completion
+	if identityResp == "" {
+		// Identity probe failed; don't fail the whole verification on it.
+		result.IdentityConsistent = true
+		return result
+	}
+	result.IdentityConsistent = identityMatchesModel(identityResp, result.ClaimedModel)
+	if !result.IdentityConsistent {
+		result.Verdict = FingerprintMismatch
+		result.Detail = fmt.Sprintf("identity probe: claimed %q but model identifies as %q",
+			result.ClaimedModel, truncateForLog([]byte(identityResp), 120))
 	}
 	return result
+}
+
+// identityPrompt asks the model to identify itself in one sentence.
+const identityPrompt = "Who are you? Answer in one short sentence."
+
+// modelFamilyKeywords maps model name patterns to expected identity keywords.
+var modelFamilyKeywords = []struct {
+	pattern  string
+	keywords []string
+}{
+	{"gpt", []string{"openai", "gpt"}},
+	{"o1", []string{"openai"}},
+	{"o3", []string{"openai"}},
+	{"claude", []string{"anthropic", "claude"}},
+	{"gemini", []string{"google", "gemini"}},
+	{"deepseek", []string{"deepseek"}},
+	{"llama", []string{"meta", "llama"}},
+	{"mistral", []string{"mistral"}},
+	{"mixtral", []string{"mistral"}},
+	{"grok", []string{"xai", "grok"}},
+	{"qwen", []string{"alibaba", "qwen", "tongyi"}},
+	{"glm", []string{"zhipu", "glm"}},
+	{"moonshot", []string{"moonshot", "kimi"}},
+	{"kimi", []string{"moonshot", "kimi"}},
+	{"doubao", []string{"bytedance", "doubao"}},
+	{"ernie", []string{"baidu", "ernie", "wenxin"}},
+	{"spark", []string{"xfyun", "spark", "xunfei"}},
+	{"hunyuan", []string{"tencent", "hunyuan"}},
+	{"minimax", []string{"minimax"}},
+	{"yi-", []string{"lingyiwanwu", "yi"}},
+	{"phi", []string{"microsoft", "phi"}},
+	{"gemma", []string{"google", "gemma"}},
+	{"command", []string{"cohere", "command"}},
+	{"palm", []string{"google", "palm"}},
+	{"falcon", []string{"tii", "falcon"}},
+	{"vicuna", []string{"vicuna"}},
+	{"wizardlm", []string{"wizardlm"}},
+	{"codellama", []string{"meta", "codellama"}},
+	{"starling", []string{"starling"}},
+	{"zephyr", []string{"zephyr"}},
+	{"solar", []string{"upstage", "solar"}},
+}
+
+// identityMatchesModel checks if the identity response mentions the expected
+// model family keywords for the claimed model.
+func identityMatchesModel(response, claimedModel string) bool {
+	resp := strings.ToLower(response)
+	claimed := strings.ToLower(claimedModel)
+	for _, mf := range modelFamilyKeywords {
+		if strings.Contains(claimed, mf.pattern) {
+			for _, kw := range mf.keywords {
+				if strings.Contains(resp, kw) {
+					return true
+				}
+			}
+			// Claimed model matched a family but response mentions none of
+			// its keywords: inconsistent.
+			return false
+		}
+	}
+	// Unknown model family: can't judge, treat as consistent.
+	return true
+}
+
+type tokenPair struct {
+	Prompt     int
+	Completion int
+}
+
+// probeIdentity sends the identity question to the channel and returns the
+// model's self-identification text plus token usage.
+func probeIdentity(ctx context.Context, baseURL, key, claimedModel string) (string, tokenPair) {
+	var tokens tokenPair
+	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":%q}],"max_tokens":64,"temperature":0}`,
+		claimedModel, identityPrompt)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/chat/completions", bytes.NewBufferString(body))
+	if err != nil {
+		return "", tokens
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+key)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", tokens
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 16*1024))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return "", tokens
+	}
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
+	}
+	if err := common.Unmarshal(respBody, &parsed); err != nil {
+		return "", tokens
+	}
+	tokens.Prompt = parsed.Usage.PromptTokens
+	tokens.Completion = parsed.Usage.CompletionTokens
+	if len(parsed.Choices) == 0 {
+		return "", tokens
+	}
+	return strings.TrimSpace(parsed.Choices[0].Message.Content), tokens
 }
 
 // modelsMatch compares the claimed model against the echoed one.
@@ -203,16 +354,20 @@ func RunModelVerifyTask(ctx context.Context) (*ModelVerifySummary, error) {
 		costQuota := calculateProbeCost(result.ClaimedModel, result.PromptTokens, result.CompletionTokens)
 
 		_ = model.RecordVerificationLog(&model.ChannelVerificationLog{
-			ChannelId:         ch.Id,
-			ClaimedModel:      result.ClaimedModel,
-			EchoedModel:       result.EchoedModel,
-			SystemFingerprint: result.SystemFingerprint,
-			Verdict:           string(result.Verdict),
-			Detail:            result.Detail,
-			LatencyMs:         result.LatencyMs,
-			PromptTokens:      result.PromptTokens,
-			CompletionTokens:  result.CompletionTokens,
-			CostQuota:         costQuota,
+			ChannelId:          ch.Id,
+			ClaimedModel:       result.ClaimedModel,
+			EchoedModel:        result.EchoedModel,
+			SystemFingerprint:  result.SystemFingerprint,
+			Verdict:            string(result.Verdict),
+			Detail:             result.Detail,
+			LatencyMs:          result.LatencyMs,
+			PromptTokens:       result.PromptTokens,
+			CompletionTokens:   result.CompletionTokens,
+			CostQuota:          costQuota,
+			BaseURLHost:        result.BaseURLHost,
+			EndpointOfficial:   result.EndpointOfficial,
+			IdentityResponse:   result.IdentityResponse,
+			IdentityConsistent: result.IdentityConsistent,
 		})
 
 		switch result.Verdict {
@@ -236,6 +391,8 @@ func RunModelVerifyTask(ctx context.Context) (*ModelVerifySummary, error) {
 			summary.Errors++
 			// Transient probe errors don't change verification state.
 		}
+		// P7-6: recalculate trust score after each probe.
+		_ = model.UpdateChannelTrustScore(ch.Id)
 	}
 	return summary, nil
 }
