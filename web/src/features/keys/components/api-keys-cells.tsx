@@ -175,6 +175,34 @@ export function IpRestrictionsCell(props: ApiKeyRestrictionProps) {
   )
 }
 
+export function ChannelAllowlistCell(props: ApiKeyRestrictionProps) {
+  const { t } = useTranslation()
+  let channelIds: number[] = []
+  const raw = props.apiKey.channel_allowlist
+  if (raw) {
+    try {
+      const parsed: unknown = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        channelIds = parsed.filter(
+          (id): id is number => typeof id === 'number'
+        )
+      }
+    } catch {
+      channelIds = []
+    }
+  }
+
+  return (
+    <ApiKeyRestrictionCell
+      items={channelIds.map((id) => `#${id}`)}
+      label={t('{{count}} channels bound', { count: channelIds.length })}
+      title={t('Bound Channels')}
+      emptyLabel={t('No restriction')}
+      detailsTrigger={props.detailsTrigger}
+    />
+  )
+}
+
 function ApiKeyRestrictionCell(props: {
   items: string[]
   label: string

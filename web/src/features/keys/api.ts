@@ -125,3 +125,27 @@ export async function fetchTokenKeysBatch(ids: number[]): Promise<{
   const res = await api.post('/api/token/batch/keys', { ids })
   return res.data
 }
+
+// ============================================================================
+// Channel Allowlist
+// ============================================================================
+
+// Get the channel IDs a token is restricted to. Empty list = no restriction.
+export async function getChannelAllowlist(
+  tokenId: number
+): Promise<ApiResponse<{ channel_ids: number[] }>> {
+  const res = await api.get(`/api/token/${tokenId}/channel-allowlist`)
+  return res.data
+}
+
+// Set the channel IDs a token may use. Empty list clears the restriction.
+// Only enabled contributor channels are accepted by the backend.
+export async function updateChannelAllowlist(
+  tokenId: number,
+  channelIds: number[]
+): Promise<ApiResponse<{ channel_ids: number[] }>> {
+  const res = await api.put(`/api/token/${tokenId}/channel-allowlist`, {
+    channel_ids: channelIds,
+  })
+  return res.data
+}

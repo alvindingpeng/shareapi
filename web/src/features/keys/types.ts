@@ -46,6 +46,7 @@ export const apiKeySchema = z.object({
   model_limits_enabled: z.boolean(),
   model_limits: z.string().nullish().default(''),
   allow_ips: z.string().nullish().default(''),
+  channel_allowlist: z.string().nullish().default(''),
 })
 
 export type ApiKey = z.infer<typeof apiKeySchema>
@@ -111,3 +112,4 @@ export type ApiKeysDialogType =
   | 'delete'
   | 'batch-delete'
   | 'cc-switch'
+  | 'channel-allowlist'

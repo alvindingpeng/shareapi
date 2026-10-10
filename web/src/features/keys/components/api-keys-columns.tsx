@@ -42,6 +42,7 @@ import {
   ApiKeyCell,
   IpRestrictionsCell,
   ModelLimitsCell,
+  ChannelAllowlistCell,
 } from './api-keys-cells'
 import { DataTableRowActions } from './data-table-row-actions'
 
@@ -180,6 +181,15 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
         accessorKey: 'allow_ips',
         header: t('IP Restriction'),
         cell: ({ row }) => <IpRestrictionsCell apiKey={row.original} />,
+        enableSorting: false,
+        size: 160,
+        meta: { mobileHidden: true },
+      },
+      {
+        id: 'channel_allowlist',
+        accessorKey: 'channel_allowlist',
+        header: t('Bound Channels'),
+        cell: ({ row }) => <ChannelAllowlistCell apiKey={row.original} />,
         enableSorting: false,
         size: 160,
         meta: { mobileHidden: true },

@@ -26,6 +26,7 @@ import {
   ArrowRightLeft,
   Copy,
   Link,
+  Network,
   Loader2,
 } from 'lucide-react'
 import { useCallback, useState } from 'react'
@@ -265,6 +266,17 @@ export function DataTableRowActions<TData>({
           {t('CC Switch')}
           <DropdownMenuShortcut>
             <ArrowRightLeft size={16} />
+          </DropdownMenuShortcut>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            setCurrentRow(apiKey)
+            setOpen('channel-allowlist')
+          }}
+        >
+          {t('Bind Channels')}
+          <DropdownMenuShortcut>
+            <Network size={16} />
           </DropdownMenuShortcut>
         </DropdownMenuItem>
         {hasChatPresets && (
