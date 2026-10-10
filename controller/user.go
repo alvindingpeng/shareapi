@@ -1470,3 +1470,46 @@ func UpdateUserSetting(c *gin.Context) {
 
 	common.ApiSuccessI18n(c, i18n.MsgSettingSaved, nil)
 }
+
+// GetSubscribedModels returns the current user's subscribed models.
+// P11: replaces group-based model access; empty means all models available.
+func GetSubscribedModels(c *gin.Context) {
+	userId := c.GetInt("id")
+	user, err := model.GetUserById(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"models": user.GetSubscribedModels(),
+	})
+}
+
+// UpdateSubscribedModels sets the current user's subscribed models.
+// Only models available in the marketplace can be subscribed.
+func UpdateSubscribedModels(c *gin.Context) {
+	userId := c.GetInt("id")
+	var req struct {
+		Models []string `json:"models"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		c.JSON(400, gin.H{"success": false, "message": "invalid request"})
+		return
+	}
+	user, err := model.GetUserById(userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := user.SetSubscribedModels(req.Models); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.DB.Model(user).Update("subscribed_models", user.SubscribedModels).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"models": user.GetSubscribedModels(),
+	})
+}
