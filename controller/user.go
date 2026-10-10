@@ -1475,7 +1475,7 @@ func UpdateUserSetting(c *gin.Context) {
 // P11: replaces group-based model access; empty means all models available.
 func GetSubscribedModels(c *gin.Context) {
 	userId := c.GetInt("id")
-	user, err := model.GetUserById(userId)
+	user, err := model.GetUserById(userId, false)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -1496,7 +1496,7 @@ func UpdateSubscribedModels(c *gin.Context) {
 		c.JSON(400, gin.H{"success": false, "message": "invalid request"})
 		return
 	}
-	user, err := model.GetUserById(userId)
+	user, err := model.GetUserById(userId, false)
 	if err != nil {
 		common.ApiError(c, err)
 		return
