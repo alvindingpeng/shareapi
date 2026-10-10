@@ -33,6 +33,22 @@ docker compose version >/dev/null 2>&1 || die "docker compose plugin missing"
 if [ -d "$APP_DIR/.git" ]; then
   log "updating $APP_DIR ..."
   git -C "$APP_DIR" fetch --depth 1 origin main
+  # Guard: never silently wipe server-local changes (e.g. i18n patches applied
+  # directly on the server). Back up dirty tracked files before the hard reset.
+  DIRTY="$(git -C "$APP_DIR" status --porcelain | awk '{print $2}')"
+  if [ -n "$DIRTY" ]; then
+    BACKUP="/tmp/shareapi-dirty-backup-$(date -u +%Y%m%dT%H%M%SZ)"
+    mkdir -p "$BACKUP"
+    log "WARNING: working tree has uncommitted changes - backing up to $BACKUP before reset:"
+    # shellcheck disable=SC2086
+    for f in $DIRTY; do
+      [ -f "$APP_DIR/$f" ] || continue
+      log "  dirty: $f"
+      mkdir -p "$BACKUP/$(dirname "$f")"
+      cp -p "$APP_DIR/$f" "$BACKUP/$f"
+    done
+    log "backup done - re-apply manually if the fresh tree still lacks these changes"
+  fi
   git -C "$APP_DIR" reset --hard origin/main
 else
   log "cloning $REPO_URL ..."

@@ -33,6 +33,8 @@ import {
   Trash2,
   RefreshCw,
   Loader2,
+  Check,
+  X,
 } from 'lucide-react'
 import { useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -52,6 +54,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { Textarea } from '@/components/ui/textarea'
 import {
   ADMIN_PERMISSION_ACTIONS,
   ADMIN_PERMISSION_RESOURCES,
@@ -59,10 +62,12 @@ import {
 } from '@/lib/admin-permissions'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { MODEL_FETCHABLE_TYPES } from '../constants'
+import { MODEL_FETCHABLE_TYPES, CHANNEL_STATUS } from '../constants'
 import {
   channelsQueryKeys,
+  handleApproveChannel,
   handleDeleteChannel,
+  handleRejectChannel,
   handleTestChannel,
   handleToggleChannelStatus,
   isChannelEnabled,
@@ -84,15 +89,24 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((s) => s.auth.user)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [rejectConfirmOpen, setRejectConfirmOpen] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
   const [isTesting, setIsTesting] = useState(false)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
+  const [isReviewing, setIsReviewing] = useState(false)
 
   const isEnabled = isChannelEnabled(channel)
   const isMultiKey = isMultiKeyChannel(channel)
+  const isPendingReview = channel.status === CHANNEL_STATUS.PENDING_REVIEW
   const canEditSensitive = hasPermission(
     currentUser,
     ADMIN_PERMISSION_RESOURCES.CHANNEL,
     ADMIN_PERMISSION_ACTIONS.SENSITIVE_WRITE
+  )
+  const canReview = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.CHANNEL,
+    ADMIN_PERMISSION_ACTIONS.OPERATE
   )
 
   const handleEdit = () => {
@@ -151,6 +165,37 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
       await handleToggleChannelStatus(channel.id, channel.status, queryClient)
     } finally {
       setIsTogglingStatus(false)
+    }
+  }
+
+  const handleApprove = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation()
+    if (!canReview) return
+    setIsReviewing(true)
+    try {
+      await handleApproveChannel(channel.id, queryClient)
+    } finally {
+      setIsReviewing(false)
+    }
+  }
+
+  const handleOpenRejectDialog = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation()
+    if (!canReview) return
+    setRejectReason('')
+    setRejectConfirmOpen(true)
+  }
+
+  const handleRejectConfirm = async () => {
+    if (!canReview) return
+    setIsReviewing(true)
+    try {
+      await handleRejectChannel(channel.id, rejectReason, queryClient, () => {
+        setRejectConfirmOpen(false)
+        setRejectReason('')
+      })
+    } finally {
+      setIsReviewing(false)
     }
   }
 
@@ -249,6 +294,51 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           {isEnabled ? t('Disable') : t('Enable')}
         </TooltipContent>
       </Tooltip>
+
+      {/* Admin review: approve / reject pending-review channels */}
+      {isPendingReview && (
+        <>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant='ghost'
+                  size='icon-sm'
+                  onClick={handleApprove}
+                  disabled={isReviewing || !canReview}
+                  aria-label={t('Approve')}
+                  className='text-success hover:text-success'
+                />
+              }
+            >
+              {isReviewing ? (
+                <Loader2 className='size-4 animate-spin' />
+              ) : (
+                <Check className='size-4' />
+              )}
+            </TooltipTrigger>
+            <TooltipContent>{t('Approve')}</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant='ghost'
+                  size='icon-sm'
+                  onClick={handleOpenRejectDialog}
+                  disabled={isReviewing || !canReview}
+                  aria-label={t('Reject')}
+                  className='text-destructive hover:text-destructive'
+                />
+              }
+            >
+              <X className='size-4' />
+            </TooltipTrigger>
+            <TooltipContent>{t('Reject')}</TooltipContent>
+          </Tooltip>
+        </>
+      )}
 
       <DropdownMenu>
         <DropdownMenuTrigger
@@ -382,6 +472,39 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           setDeleteConfirmOpen(false)
         }}
       />
+
+      <ConfirmDialog
+        open={rejectConfirmOpen}
+        onOpenChange={(open) => {
+          setRejectConfirmOpen(open)
+          if (!open) setRejectReason('')
+        }}
+        title={t('Reject Channel')}
+        desc={t(
+          'Are you sure you want to reject channel "{{name}}"? The contributor will need to resubmit it.',
+          { name: channel.name }
+        )}
+        confirmText={t('Reject')}
+        destructive
+        isLoading={isReviewing}
+        handleConfirm={handleRejectConfirm}
+      >
+        <div className='grid gap-1.5'>
+          <label
+            htmlFor={`reject-reason-${channel.id}`}
+            className='text-sm font-medium'
+          >
+            {t('Reject reason')}
+          </label>
+          <Textarea
+            id={`reject-reason-${channel.id}`}
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            placeholder={t('Please enter the rejection reason...')}
+            rows={3}
+          />
+        </div>
+      </ConfirmDialog>
     </div>
   )
 }

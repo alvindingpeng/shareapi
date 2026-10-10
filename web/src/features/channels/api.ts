@@ -231,6 +231,38 @@ export async function deleteChannel(
 }
 
 /**
+ * Approve a pending-review channel (admin review).
+ */
+export async function approveChannel(
+  id: number
+): Promise<{ success: boolean; message?: string; data?: boolean }> {
+  const res = await api.post(
+    `/api/channel/${id}/approve`,
+    {},
+    channelActionConfig()
+  )
+  return res.data
+}
+
+/**
+ * Reject a pending-review channel (admin review).
+ *
+ * `reason` is forwarded in the request body for auditing; the current backend
+ * review endpoint does not persist it yet, so it is informational only.
+ */
+export async function rejectChannel(
+  id: number,
+  reason?: string
+): Promise<{ success: boolean; message?: string; data?: boolean }> {
+  const res = await api.post(
+    `/api/channel/${id}/reject`,
+    { reason: reason ?? '' },
+    channelActionConfig()
+  )
+  return res.data
+}
+
+/**
  * Batch delete channels
  */
 export async function batchDeleteChannels(
