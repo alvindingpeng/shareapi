@@ -404,8 +404,10 @@ func GetMarketplaceModelChannels(c *gin.Context) {
 		if !serves {
 			continue
 		}
+		// Keep multiplier as-is: 0 = free channel (frontend shows "Free"),
+		// negative = data issue, normalize to 1.0.
 		mult := ch.PriceMultiplier
-		if mult <= 0 {
+		if mult < 0 {
 			mult = 1.0
 		}
 		entry := &MarketplaceChannel{
