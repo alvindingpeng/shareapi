@@ -185,6 +185,73 @@ func GetTokenAutoGroups(c *gin.Context) {
 	})
 }
 
+// GetTokenChannelAllowlist returns the channel IDs a token is restricted to.
+// Empty list means no restriction.
+func GetTokenChannelAllowlist(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	userId := c.GetInt("id")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	token, err := model.GetTokenByIds(id, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"channel_ids": token.GetChannelAllowlist(),
+	})
+}
+
+// UpdateTokenChannelAllowlist sets the channel IDs a token may use.
+// Only enabled contributor channels are accepted; empty list clears restriction.
+func UpdateTokenChannelAllowlist(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	userId := c.GetInt("id")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var req struct {
+		ChannelIDs []int `json:"channel_ids"`
+	}
+	if err := common.DecodeJson(c.Request.Body, &req); err != nil {
+		c.JSON(400, gin.H{"success": false, "message": "invalid request"})
+		return
+	}
+	token, err := model.GetTokenByIds(id, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	// Validate: only enabled contributor channels can be allowlisted.
+	if len(req.ChannelIDs) > 0 {
+		var count int64
+		if err := model.DB.Model(&model.Channel{}).
+			Where("id IN ? AND status = ? AND owner_user_id > 0", req.ChannelIDs, common.ChannelStatusEnabled).
+			Count(&count).Error; err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if int(count) != len(req.ChannelIDs) {
+			c.JSON(400, gin.H{"success": false, "message": "one or more channels are invalid or unavailable"})
+			return
+		}
+	}
+	if err := token.SetChannelAllowlist(req.ChannelIDs); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.DB.Model(token).Update("channel_allowlist", token.ChannelAllowlist).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"channel_ids": token.GetChannelAllowlist(),
+	})
+}
+
 func GetTokenKey(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	userId := c.GetInt("id")

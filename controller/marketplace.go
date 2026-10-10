@@ -351,3 +351,99 @@ func GetMarketplaceChannelDetail(c *gin.Context) {
 		},
 	})
 }
+
+// GetMarketplaceModelChannels lists all enabled contributor channels serving
+// a specific model, for price/trust comparison on the model detail page.
+// Public endpoint (no auth).
+// Query params: sort=price|trust (default price).
+func GetMarketplaceModelChannels(c *gin.Context) {
+	modelName := strings.TrimSpace(c.Param("name"))
+	if modelName == "" {
+		c.JSON(400, gin.H{"success": false, "message": "model name required"})
+		return
+	}
+
+	var channels []*model.Channel
+	if err := model.DB.Where("status = ? AND owner_user_id > 0", common.ChannelStatusEnabled).
+		Find(&channels).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	// Batch-load sharer display names.
+	ownerIDs := make([]int, 0, len(channels))
+	seen := map[int]bool{}
+	for _, ch := range channels {
+		if !seen[ch.OwnerUserID] {
+			seen[ch.OwnerUserID] = true
+			ownerIDs = append(ownerIDs, ch.OwnerUserID)
+		}
+	}
+	sharerNames := map[int]string{}
+	if len(ownerIDs) > 0 {
+		var users []model.User
+		_ = model.DB.Select("id", "username", "display_name").Where("id IN ?", ownerIDs).Find(&users).Error
+		for _, u := range users {
+			name := u.DisplayName
+			if name == "" {
+				name = u.Username
+			}
+			sharerNames[u.Id] = anonymizeSharer(name)
+		}
+	}
+
+	list := make([]*MarketplaceChannel, 0)
+	for _, ch := range channels {
+		serves := false
+		for _, m := range ch.GetModels() {
+			if m == modelName {
+				serves = true
+				break
+			}
+		}
+		if !serves {
+			continue
+		}
+		mult := ch.PriceMultiplier
+		if mult <= 0 {
+			mult = 1.0
+		}
+		entry := &MarketplaceChannel{
+			ChannelID:          ch.Id,
+			Name:               ch.Name,
+			Type:               ch.Type,
+			Models:             ch.GetModels(),
+			Sharer:             sharerNames[ch.OwnerUserID],
+			PriceMultiplier:    mult,
+			TrustScore:         ch.TrustScore,
+			VerificationStatus: ch.VerificationStatus,
+		}
+		if log, err := model.GetLatestVerificationLog(ch.Id); err == nil && log != nil {
+			entry.EndpointOfficial = log.EndpointOfficial
+		}
+		list = append(list, entry)
+	}
+
+	// Sort: price ascending (free first) by default, or trust descending.
+	sortParam := strings.ToLower(strings.TrimSpace(c.Query("sort")))
+	if sortParam == "trust" {
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].TrustScore != list[j].TrustScore {
+				return list[i].TrustScore > list[j].TrustScore
+			}
+			return list[i].PriceMultiplier < list[j].PriceMultiplier
+		})
+	} else {
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].PriceMultiplier != list[j].PriceMultiplier {
+				return list[i].PriceMultiplier < list[j].PriceMultiplier
+			}
+			return list[i].TrustScore > list[j].TrustScore
+		})
+	}
+
+	c.JSON(200, gin.H{
+		"success": true,
+		"data":    list,
+	})
+}
