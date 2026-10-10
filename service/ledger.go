@@ -15,10 +15,11 @@ import (
 // 7 days before becoming withdrawable.
 
 // contributorShare returns the fraction of consumed quota credited to the
-// contributor. Env-tunable; default 0.7 (70%).
+// contributor. Env-tunable; default 0.85 (85%, platform takes 15% per
+// ShareLLM model).
 func contributorShare() float64 {
 	// GetEnvOrDefault returns int; use basis points for fractional config.
-	bps := common.GetEnvOrDefault("CONTRIBUTOR_SHARE_BPS", 7000)
+	bps := common.GetEnvOrDefault("CONTRIBUTOR_SHARE_BPS", 8500)
 	if bps < 0 {
 		bps = 0
 	}
@@ -36,9 +37,34 @@ func ledgerMatureDays() int {
 	return 7
 }
 
+// applyContributorPricing scales the quota by the channel's price multiplier
+// for contributor-owned channels (Phase 7). Returns the quota unchanged for
+// operator channels or when the multiplier is 1.0.
+func applyContributorPricing(channelID int, quota int) int {
+	if quota <= 0 || channelID <= 0 {
+		return quota
+	}
+	channel, err := model.GetChannelById(channelID, false)
+	if err != nil {
+		return quota
+	}
+	if channel.OwnerUserID <= 0 {
+		return quota
+	}
+	mult := channel.PriceMultiplier
+	if mult <= 0 {
+		mult = 1.0
+	}
+	if mult == 1.0 {
+		return quota
+	}
+	return int(float64(quota) * mult)
+}
+
 // RecordContributorEarning credits a contributor for a settled relay.
 // It is fire-and-forget: ledger failures must not break the relay path.
 // Call with the channel ID, the settled quota, and the source log ID.
+// Also records the platform fee entry (P7-3).
 func RecordContributorEarning(channelID int, settledQuota int, logID int) {
 	if settledQuota <= 0 || channelID <= 0 {
 		return
@@ -55,6 +81,11 @@ func RecordContributorEarning(channelID int, settledQuota int, logID int) {
 		return
 	}
 	_ = model.RecordEarning(channel.OwnerUserID, channelID, logID, share, ledgerMatureDays())
+	// P7-3: record platform fee (the remainder).
+	fee := int64(settledQuota) - share
+	if fee > 0 {
+		_ = model.RecordPlatformFee(channel.OwnerUserID, channelID, logID, fee)
+	}
 }
 
 // SettlementSummary is the per-run outcome of the settlement task.

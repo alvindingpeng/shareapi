@@ -61,6 +61,13 @@ func DeleteContributorChannel(id int, ownerUserID int) error {
 	if result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound
 	}
+	// F1 fix: remove stale ability rows so the deleted channel can no longer
+	// take relay traffic, then refresh the channel cache to drop it from
+	// memory (including any decrypted key material).
+	if err := DB.Where("channel_id = ?", id).Delete(&Ability{}).Error; err != nil {
+		return err
+	}
+	InitChannelCache()
 	return nil
 }
 

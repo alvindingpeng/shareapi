@@ -1,6 +1,8 @@
 package model
 
 import (
+	"fmt"
+
 	"github.com/QuantumNous/new-api/common"
 )
 
@@ -11,9 +13,10 @@ import (
 
 // Ledger entry types.
 const (
-	LedgerTypeEarning    = "earning"    // revenue share from a relayed call
-	LedgerTypePayout     = "payout"     // withdrawal paid out
-	LedgerTypeAdjustment = "adjustment" // manual correction by admin
+	LedgerTypeEarning     = "earning"      // revenue share from a relayed call
+	LedgerTypePayout      = "payout"       // withdrawal paid out
+	LedgerTypeAdjustment  = "adjustment"   // manual correction by admin
+	LedgerTypePlatformFee = "platform_fee" // platform's 15% cut (P7-3)
 )
 
 // Ledger entry statuses.
@@ -49,6 +52,23 @@ func RecordEarning(contributorID, channelID, logID int, amount int64, matureDays
 		Amount:        amount,
 		CreatedAt:     now,
 		MaturedAt:     now + int64(matureDays)*86400,
+	}).Error
+}
+
+// RecordPlatformFee records the platform's cut (P7-3). Platform fees are
+// immediately matured (no withdrawal needed).
+func RecordPlatformFee(contributorID, channelID, logID int, amount int64) error {
+	now := common.GetTimestamp()
+	return DB.Create(&ContributorLedger{
+		ContributorID: 0, // platform, not a contributor
+		ChannelID:     channelID,
+		LogID:         logID,
+		Type:          LedgerTypePlatformFee,
+		Status:        LedgerStatusMatured,
+		Amount:        amount,
+		Note:          fmt.Sprintf("platform fee from contributor %d", contributorID),
+		CreatedAt:     now,
+		MaturedAt:     now,
 	}).Error
 }
 

@@ -23,3 +23,25 @@ func TestModelsMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestIdentityMatchesModel(t *testing.T) {
+	cases := []struct {
+		response string
+		claimed  string
+		want     bool
+	}{
+		{"I am GPT-4, a large language model developed by OpenAI.", "gpt-4", true},
+		{"I am Claude, an AI assistant created by Anthropic.", "gpt-4", false},
+		{"I am Muse, created by Anthropic.", "claude-3-opus", true},
+		{"I am a large language model from OpenAI.", "claude-3-opus", false},
+		{"I am Gemini, developed by Google.", "gemini-pro", true},
+		{"I am DeepSeek, an AI assistant.", "deepseek-chat", true},
+		// Unknown model family: can't judge, treat as consistent.
+		{"I am some custom model.", "my-custom-model", true},
+	}
+	for _, tc := range cases {
+		if got := identityMatchesModel(tc.response, tc.claimed); got != tc.want {
+			t.Errorf("identityMatchesModel(%q, %q) = %v, want %v", tc.response, tc.claimed, got, tc.want)
+		}
+	}
+}

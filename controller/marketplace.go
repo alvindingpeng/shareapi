@@ -16,8 +16,11 @@ type MarketplaceModel struct {
 	Model            string  `json:"model"`
 	Channels         int     `json:"channels"`
 	VerifiedChannels int     `json:"verified_channels"`
-	TrustScore       float64 `json:"trust_score"`
-	Price            float64 `json:"price"`
+	TrustScore       float64 `json:"trust_score"`       // avg 0-100 trust score (P7-6)
+	TrustScoreSum    float64 `json:"-"`                 // internal accumulator
+	Price            float64 `json:"price"`             // best (lowest) contributor price
+	BasePrice        float64 `json:"base_price"`        // platform base price
+	MinMultiplier    float64 `json:"min_multiplier"`    // lowest price multiplier
 	Available        bool    `json:"available"`
 }
 
@@ -34,6 +37,10 @@ func GetMarketplaceModels(c *gin.Context) {
 
 	agg := map[string]*MarketplaceModel{}
 	for _, ch := range channels {
+		mult := ch.PriceMultiplier
+		if mult <= 0 {
+			mult = 1.0
+		}
 		for _, m := range ch.GetModels() {
 			m = strings.TrimSpace(m)
 			if m == "" {
@@ -41,12 +48,18 @@ func GetMarketplaceModels(c *gin.Context) {
 			}
 			entry, ok := agg[m]
 			if !ok {
-				entry = &MarketplaceModel{Model: m}
+				entry = &MarketplaceModel{Model: m, MinMultiplier: mult}
 				agg[m] = entry
 			}
 			entry.Channels++
 			if ch.VerificationStatus == model.VerificationVerified {
 				entry.VerifiedChannels++
+			}
+			// P7-6: accumulate trust scores for averaging.
+			entry.TrustScoreSum += float64(ch.TrustScore)
+			// Track the lowest multiplier for best-price display.
+			if mult < entry.MinMultiplier {
+				entry.MinMultiplier = mult
 			}
 		}
 	}
@@ -62,11 +75,14 @@ func GetMarketplaceModels(c *gin.Context) {
 	list := make([]*MarketplaceModel, 0, len(agg))
 	for _, entry := range agg {
 		if entry.Channels > 0 {
-			entry.TrustScore = float64(entry.VerifiedChannels) / float64(entry.Channels)
+			// P7-6: use average trust score across channels for this model.
+			entry.TrustScore = entry.TrustScoreSum / float64(entry.Channels)
 			entry.Available = true
 		}
 		if price, ok := priceByModel[entry.Model]; ok {
-			entry.Price = price
+			entry.BasePrice = price
+			// Effective price = base * contributor's multiplier (best price).
+			entry.Price = price * entry.MinMultiplier
 		}
 		list = append(list, entry)
 	}

@@ -27,7 +27,13 @@ type ChannelVerificationLog struct {
 	PromptTokens      int    `json:"prompt_tokens"`
 	CompletionTokens  int    `json:"completion_tokens"`
 	CostQuota         int64  `json:"cost_quota"` // quota units consumed by the probe
-	CreatedAt         int64  `json:"created_at" gorm:"bigint;index"`
+	// P7-4: base-URL certification.
+	BaseURLHost      string `json:"base_url_host"`
+	EndpointOfficial bool   `json:"endpoint_official"`
+	// P7-5: L4 behavioral fingerprint.
+	IdentityResponse   string `json:"identity_response" gorm:"type:text"`
+	IdentityConsistent bool   `json:"identity_consistent"`
+	CreatedAt          int64  `json:"created_at" gorm:"bigint;index"`
 }
 
 // RecordVerificationLog persists a probe result.
@@ -54,6 +60,68 @@ func UpdateChannelVerification(channelID int, status int, fails int) error {
 		"last_verified_at":    common.GetTimestamp(),
 		"verification_fails":  fails,
 	}).Error
+}
+
+// CalculateTrustScore computes a 0-100 trust score for a channel (P7-6).
+// Components:
+//   - Base: 50
+//   - Official endpoint (P7-4): +20
+//   - Identity consistent (P7-5): +10
+//   - Recent verification success rate (last 10 probes): 0 to +20
+//   - Consecutive failures: -10 each (max -30)
+//
+// The score is clamped to [0, 100].
+func CalculateTrustScore(channelID int) int {
+	score := 50
+
+	// Latest probe: endpoint certification and identity.
+	latest, err := GetLatestVerificationLog(channelID)
+	if err == nil && latest != nil {
+		if latest.EndpointOfficial {
+			score += 20
+		}
+		if latest.IdentityConsistent {
+			score += 10
+		}
+	}
+
+	// Recent success rate from last 10 probes.
+	var logs []ChannelVerificationLog
+	if err := DB.Where("channel_id = ?", channelID).
+		Order("id DESC").Limit(10).Find(&logs).Error; err == nil && len(logs) > 0 {
+		verified := 0
+		for _, l := range logs {
+			if l.Verdict == "verified" {
+				verified++
+			}
+		}
+		score += verified * 20 / len(logs)
+	}
+
+	// Consecutive failure penalty.
+	var ch Channel
+	if err := DB.Select("verification_fails").Where("id = ?", channelID).First(&ch).Error; err == nil {
+		penalty := ch.VerificationFails * 10
+		if penalty > 30 {
+			penalty = 30
+		}
+		score -= penalty
+	}
+
+	if score < 0 {
+		score = 0
+	}
+	if score > 100 {
+		score = 100
+	}
+	return score
+}
+
+// UpdateChannelTrustScore recalculates and persists the trust score.
+func UpdateChannelTrustScore(channelID int) error {
+	score := CalculateTrustScore(channelID)
+	return DB.Model(&Channel{}).Where("id = ?", channelID).
+		Update("trust_score", score).Error
 }
 
 // GetProbeCostSummary returns aggregate probe costs for platform accounting.
