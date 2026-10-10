@@ -112,6 +112,9 @@ type User struct {
 	LastLoginAt          int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
 	AuthVersion          int64                      `json:"-" gorm:"type:bigint;not null;default:1;column:auth_version"`
 	AdminPermissions     map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
+	// P11: user-subscribed models (JSON array). Determines available models;
+	// replaces the group-based model access control.
+	SubscribedModels string `json:"subscribed_models" gorm:"type:text;default:''"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -171,6 +174,33 @@ func (user *User) GetSetting() dto.UserSetting {
 		}
 	}
 	return setting
+}
+
+// GetSubscribedModels returns the user's subscribed model names.
+// Empty means no restriction (all models available).
+func (user *User) GetSubscribedModels() []string {
+	if user.SubscribedModels == "" {
+		return nil
+	}
+	var models []string
+	if err := common.UnmarshalJsonStr(user.SubscribedModels, &models); err != nil {
+		return nil
+	}
+	return models
+}
+
+// SetSubscribedModels stores the user's subscribed model names.
+func (user *User) SetSubscribedModels(models []string) error {
+	if len(models) == 0 {
+		user.SubscribedModels = ""
+		return nil
+	}
+	data, err := common.Marshal(models)
+	if err != nil {
+		return err
+	}
+	user.SubscribedModels = string(data)
+	return nil
 }
 
 func (user *User) SetSetting(setting dto.UserSetting) {
