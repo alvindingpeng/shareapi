@@ -372,6 +372,7 @@ export const ERROR_MESSAGES = {
   TEST_FAILED: 'Failed to test channel',
   BALANCE_QUERY_FAILED: 'Failed to query balance',
   FETCH_MODELS_FAILED: 'Failed to fetch models',
+  REVIEW_FAILED: 'Failed to review channel',
 } as const
 
 export const SUCCESS_MESSAGES = {
@@ -386,6 +387,8 @@ export const SUCCESS_MESSAGES = {
   COPIED: 'Channel copied successfully',
   TAG_SET: 'Tag set successfully',
   BATCH_DELETED: 'Channels deleted successfully',
+  APPROVED: 'Channel approved successfully',
+  REJECTED: 'Channel rejected successfully',
 } as const
 
 // ============================================================================

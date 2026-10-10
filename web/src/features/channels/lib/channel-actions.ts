@@ -23,8 +23,10 @@ import { toast } from 'sonner'
 import { handleServerError } from '@/lib/handle-server-error'
 
 import {
+  approveChannel,
   copyChannel,
   deleteChannel,
+  rejectChannel,
   testChannel,
   updateChannel,
   updateChannelStatus,
@@ -197,6 +199,51 @@ export async function handleDeleteChannel(
     }
   } catch (error) {
     handleServerError(error, i18next.t(ERROR_MESSAGES.DELETE_FAILED))
+  }
+}
+
+/**
+ * Approve a pending-review channel (admin review)
+ */
+export async function handleApproveChannel(
+  id: number,
+  queryClient?: QueryClient,
+  onSuccess?: () => void
+): Promise<void> {
+  try {
+    const response = await approveChannel(id)
+    if (response.success) {
+      toast.success(i18next.t(SUCCESS_MESSAGES.APPROVED))
+      queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+      onSuccess?.()
+    } else {
+      handleServerError(response, i18next.t(ERROR_MESSAGES.REVIEW_FAILED))
+    }
+  } catch (error) {
+    handleServerError(error, i18next.t(ERROR_MESSAGES.REVIEW_FAILED))
+  }
+}
+
+/**
+ * Reject a pending-review channel (admin review)
+ */
+export async function handleRejectChannel(
+  id: number,
+  reason: string,
+  queryClient?: QueryClient,
+  onSuccess?: () => void
+): Promise<void> {
+  try {
+    const response = await rejectChannel(id, reason)
+    if (response.success) {
+      toast.success(i18next.t(SUCCESS_MESSAGES.REJECTED))
+      queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
+      onSuccess?.()
+    } else {
+      handleServerError(response, i18next.t(ERROR_MESSAGES.REVIEW_FAILED))
+    }
+  } catch (error) {
+    handleServerError(error, i18next.t(ERROR_MESSAGES.REVIEW_FAILED))
   }
 }
 
