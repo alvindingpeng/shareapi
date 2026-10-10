@@ -32,13 +32,13 @@ export function WithdrawDialog(props: WithdrawDialogProps) {
 
   const withdrawSchema = z.object({
     amount: z
-      .number({ invalid_type_error: t('Amount must be a number') })
+      .number({ error: t('Amount must be a number') })
       .positive(t('Amount must be greater than 0'))
       .max(maxUsd, t('Amount cannot exceed available balance')),
-    note: z.string().max(500).optional().default(''),
+    note: z.string().max(500).optional(),
   })
 
-  type WithdrawForm = z.infer<typeof withdrawSchema>
+  type WithdrawForm = z.input<typeof withdrawSchema>
 
   const form = useForm<WithdrawForm>({
     resolver: zodResolver(withdrawSchema),

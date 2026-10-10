@@ -25,17 +25,16 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
-import { toIntlLocale } from '@/i18n/languages'
 import { formatQuotaWithCurrency } from '@/lib/currency'
 import { handleServerError } from '@/lib/handle-server-error'
 
 import { listWithdrawals, reviewWithdrawal } from '../api'
 import type { Withdrawal, WithdrawalStatus } from '../types'
 
-const STATUS_VARIANTS: Record<WithdrawalStatus, 'warning' | 'success' | 'destructive'> = {
+const STATUS_VARIANTS: Record<WithdrawalStatus, 'warning' | 'success' | 'danger'> = {
   pending: 'warning',
   approved: 'success',
-  rejected: 'destructive',
+  rejected: 'danger',
 }
 
 function StatusCell(props: { status: WithdrawalStatus }) {
@@ -59,16 +58,15 @@ function WithdrawalRow(props: {
   onApprove: (w: Withdrawal) => void
   onReject: (w: Withdrawal) => void
 }) {
-  const { t, i18n } = useTranslation()
+  const { t } = useTranslation()
   const w = props.withdrawal
-  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const isPending = w.status === 'pending'
 
   return (
     <TableRow>
       <TableCell className="font-medium">#{w.id}</TableCell>
       <TableCell>{w.contributor_id}</TableCell>
-      <TableCell>{formatQuotaWithCurrency(w.amount, locale)}</TableCell>
+      <TableCell>{formatQuotaWithCurrency(w.amount)}</TableCell>
       <TableCell className="max-w-48 truncate">{w.note || '—'}</TableCell>
       <TableCell>
         <StatusCell status={w.status} />
@@ -149,7 +147,10 @@ export function WithdrawalReviewPage() {
             {t('Review contributor withdrawal requests.')}
           </p>
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select
+          value={statusFilter}
+          onValueChange={(value) => setStatusFilter(value ?? 'pending')}
+        >
           <SelectTrigger className="w-40">
             <SelectValue placeholder={t('Status')} />
           </SelectTrigger>
@@ -206,8 +207,9 @@ export function WithdrawalReviewPage() {
         desc={t('Approve this withdrawal request? The amount will be paid out.')}
         confirmText={t('Approve')}
         handleConfirm={() => {
-          if (approveTarget)
+          if (approveTarget) {
             reviewMutation.mutate({ id: approveTarget.id, approve: true })
+          }
         }}
         isLoading={reviewMutation.isPending}
       />
